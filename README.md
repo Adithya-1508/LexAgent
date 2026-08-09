@@ -1,6 +1,6 @@
 # UAE-LexAgent
 
-An evaluation-driven, bilingual legal-agent learning project for UAE employment-law questions.
+An evaluation-driven, bilingual legal-agent project for UAE employment-law questions.
 
 The system is designed around a simple principle:
 
