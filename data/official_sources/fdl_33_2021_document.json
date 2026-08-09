@@ -1,0 +1,23 @@
+{
+  "document_id": "FDL_33_2021_CURRENT",
+  "title_en": "Federal Decree-Law No. 33 of 2021 Regarding the Regulation of Employment Relationships (as amended)",
+  "title_ar": "المرسوم بقانون اتحادي رقم 33 لسنة 2021 بشأن تنظيم علاقات العمل وتعديلاته",
+  "jurisdiction": "uae_onshore",
+  "legal_domain": "employment",
+  "source_url": "https://www.mohre.gov.ae/assets/download/e82f7872/Federal%20Decree-Law%20No.%2033%20of%202021%20Regarding%20the%20Regulation%20of%20Employment%20Relationship%20and%20its%20amendments_638990571068264034.pdf.aspx",
+  "source_type": "official",
+  "published_date": "2021-11-15",
+  "issued_date": "2021-11-15",
+  "official_gazette_date": "2021-11-30",
+  "effective_from": "2022-02-02",
+  "effective_until": null,
+  "last_updated": "2026-01-01",
+  "version": "2021-as-amended-2024",
+  "is_consolidated": true,
+  "status": "active",
+  "authoritative_language": "ar",
+  "source_ids": ["MOHRE_FDL_33_2021_AR_CURRENT", "MOHRE_FDL_33_2021_EN_CURRENT"],
+  "supersedes": ["FEDERAL_LAW_8_1980"],
+  "superseded_by": [],
+  "coverage_status": "partial_mvp"
+}

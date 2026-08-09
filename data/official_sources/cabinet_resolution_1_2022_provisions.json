@@ -1,0 +1,42 @@
+[
+    {
+        "provision_id":  "CABINET_RES_1_2022_A30_C1_AR",
+        "document_id":  "CABINET_RES_1_2022",
+        "source_id":  "MOHRE_CABINET_RES_1_2022_AR",
+        "jurisdiction":  "uae_onshore",
+        "legal_domain":  "employment",
+        "article":  "30",
+        "clause":  "1",
+        "subclause":  null,
+        "language":  "ar",
+        "is_authoritative":  true,
+        "alignment_id":  "CABINET_RES_1_2022_A30_C1",
+        "translation_of":  null,
+        "text":  "تحدد آلية احتساب مكافأة نهاية الخدمة لنمط العمل الجزئي بنسبة الأثر الساعي المئوية مقارنة بالدوام الكامل كما تكتنفها ضوابط الوزارة.",
+        "effective_from":  "2022-02-02",
+        "effective_until":  null,
+        "source_url":  "https://uaelegislation.gov.ae/ar/legislations/1547/download",
+        "page_start":  15,
+        "page_end":  15
+    },
+    {
+        "provision_id":  "CABINET_RES_1_2022_A30_C1_EN",
+        "document_id":  "CABINET_RES_1_2022",
+        "source_id":  "MOHRE_CABINET_RES_1_2022_EN",
+        "jurisdiction":  "uae_onshore",
+        "legal_domain":  "employment",
+        "article":  "30",
+        "clause":  "1",
+        "subclause":  null,
+        "language":  "en",
+        "is_authoritative":  false,
+        "alignment_id":  "CABINET_RES_1_2022_A30_C1",
+        "translation_of":  "CABINET_RES_1_2022_A30_C1_AR",
+        "text":  "The calculation mechanism for end-of-service gratuity for part-time work patterns is determined based on the percentage of working hours compared to full-time work as regulated by the Ministry.",
+        "effective_from":  "2022-02-02",
+        "effective_until":  null,
+        "source_url":  "https://uaelegislation.gov.ae/en/legislations/1547/download",
+        "page_start":  15,
+        "page_end":  15
+    }
+]
