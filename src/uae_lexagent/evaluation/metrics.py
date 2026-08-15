@@ -543,6 +543,7 @@ def compute_shubhi_signal(
     custom_weights: dict[str, float] | None = None,
     valid_corpus_alignment_ids: set[str] | None = None,
     provisions: list[LegalProvision] | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> ShubhiSignalScore:
     """Aggregate all evaluated dimensions into a composite Shubhi Signal scorecard."""
     weights = dict(custom_weights or DEFAULT_DIMENSION_WEIGHTS)
@@ -616,6 +617,7 @@ def compute_shubhi_signal(
         weights=weights,
         category_scores=category_scores,
         language_scores=language_scores,
+        metadata=dict(metadata or {}),
     )
 
 

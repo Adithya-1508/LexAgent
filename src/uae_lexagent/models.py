@@ -172,6 +172,7 @@ class LegalEvidence(BaseModel):
     sparse_score: float | None = None
     reranker_score: float | None = None
     retrieval_rank: int = Field(ge=1)
+    aligned_provisions: list[LegalProvision] = Field(default_factory=list)
 
 
 class Claim(BaseModel):
@@ -356,6 +357,7 @@ class ShubhiSignalScore(BaseModel):
     weights: dict[str, float] = Field(default_factory=dict)
     category_scores: dict[str, float] = Field(default_factory=dict)
     language_scores: dict[str, float] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class BenchmarkManifest(BaseModel):

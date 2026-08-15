@@ -87,6 +87,7 @@ def generate_json_report(
     return {
         "benchmark_version": score.benchmark_version,
         "corpus_version": score.corpus_version,
+        "metadata": score.metadata,
         "aggregate_score": score.aggregate_score,
         "weights": score.weights,
         "dimensions": [d.model_dump() for d in score.dimensions],

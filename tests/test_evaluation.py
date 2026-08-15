@@ -241,6 +241,8 @@ def test_baseline_evaluator_runs_and_generates_reports(tmp_path: Path) -> None:
     json_content = json.loads(out_json.read_text(encoding="utf-8"))
     assert "aggregate_score" in json_content
     assert json_content["total_cases"] == 200
+    assert json_content["metadata"]["retriever"] == "baseline"
+    assert len(json_content["metadata"]["corpus_fingerprint"]) == 64
 
     md_content = out_md.read_text(encoding="utf-8")
     assert "# UAE-LexAgent Benchmark Evaluation Report" in md_content

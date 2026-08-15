@@ -1,11 +1,12 @@
-"""A transparent local retrieval baseline used before vector infrastructure."""
+"""A transparent local lexical retrieval baseline used before vector infrastructure."""
 
 from __future__ import annotations
 
 import re
 from datetime import date
 
-from .models import Jurisdiction, Language, LegalEvidence, LegalProvision, LegalQuery
+from ..models import Jurisdiction, Language, LegalEvidence, LegalProvision, LegalQuery
+from .contracts import RetrievalFilters, matches_retrieval_filters
 
 
 def _tokens(text: str) -> set[str]:
@@ -23,7 +24,7 @@ def _is_temporally_valid(provision: LegalProvision, as_of: date | None) -> bool:
 
 
 class InMemoryRetriever:
-    """Lexical baseline with the same metadata filters expected by Qdrant."""
+    """Lexical baseline with metadata filters."""
 
     def __init__(self, provisions: list[LegalProvision] | None = None) -> None:
         self._provisions = list(provisions or [])
@@ -37,24 +38,21 @@ class InMemoryRetriever:
         *,
         top_k: int = 5,
         jurisdiction: Jurisdiction | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[LegalEvidence]:
         """Return provision-sized evidence after hard metadata filtering."""
-
-        target_jurisdiction = jurisdiction or query.jurisdiction
+        if top_k <= 0:
+            raise ValueError("top_k must be positive")
+        effective_filters = filters or RetrievalFilters(
+            jurisdiction=jurisdiction or query.jurisdiction,
+            as_of=query.as_of,
+            language=query.language,
+        )
         query_tokens = _tokens(query.text)
         scored: list[tuple[float, LegalProvision]] = []
 
         for provision in self._provisions:
-            if (
-                target_jurisdiction is not Jurisdiction.UNKNOWN
-                and provision.jurisdiction is not target_jurisdiction
-            ):
-                continue
-            if not _is_temporally_valid(provision, query.as_of):
-                continue
-            if query.language is Language.EN and provision.language != "en":
-                continue
-            if query.language is Language.AR and provision.language != "ar":
+            if not matches_retrieval_filters(provision, effective_filters):
                 continue
 
             provision_tokens = _tokens(provision.text)
