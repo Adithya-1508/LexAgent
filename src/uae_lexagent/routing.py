@@ -20,7 +20,19 @@ class JurisdictionDecision(BaseModel):
 _DIFC_TERMS = ("difc", "dubai international financial centre")
 _ADGM_TERMS = ("adgm", "abu dhabi global market")
 _OTHER_FREE_ZONE_TERMS = ("free zone", "freezone", "free-zone")
-_ONSHORE_TERMS = ("onshore", "mainland", "federal labour law", "federal labor law")
+_ONSHORE_TERMS = (
+    "onshore",
+    "mainland",
+    "federal labour law",
+    "federal labor law",
+    "uae labour law",
+    "uae labor law",
+    "united arab emirates labour law",
+    "united arab emirates labor law",
+    "federal decree-law",
+    "قانون العمل الإماراتي",
+    "قانون العمل في الإمارات",
+)
 
 
 def _matches(text: str, terms: tuple[str, ...]) -> list[str]:
@@ -83,4 +95,3 @@ def classify_jurisdiction(text: str) -> JurisdictionDecision:
         requires_clarification=True,
         reason="Location alone is insufficient to establish the legal regime.",
     )
-

@@ -1,0 +1,23 @@
+{
+  "benchmark_id": "UAE_LEX_BENCHMARK_V1",
+  "schema_version": "1.0.0",
+  "benchmark_version": "1.0.0",
+  "corpus_version": "2021-as-amended-2024",
+  "total_cases": 200,
+  "coverage_status": "partial_mvp",
+  "created_at": "2026-08-15T00:00:00Z",
+  "category_distribution": {
+    "direct_factual": 30,
+    "multi_hop": 25,
+    "code_switched": 25,
+    "tool_calculation": 25,
+    "adversarial": 20,
+    "out_of_scope": 20,
+    "jurisdiction_distractor": 20,
+    "temporal_versioning": 15,
+    "citation_verification": 20
+  },
+  "dataset_path": "data/evaluation/benchmark_queries.jsonl",
+  "dataset_sha256": "98558c60462304fd132765c80bfccb4e6bd282a231bafdfb3765b79d2a003db5",
+  "corpus_fingerprint": "d33e39ee8da99066fc768c7f039eb1b4412a130b47ab9218c21bc20df4de52be"
+}

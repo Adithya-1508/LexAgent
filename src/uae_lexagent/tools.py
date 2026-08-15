@@ -59,3 +59,40 @@ def calculate_end_of_service_gratuity(
         legal_basis=policy.legal_basis,
     )
 
+
+def calculate_gratuity(
+    basic_salary: float | Decimal,
+    service_years: float | Decimal,
+) -> dict[str, Any]:
+    """Calculate UAE statutory gratuity under Federal Decree-Law No. 33 of 2021 Article 51."""
+    salary = Decimal(str(basic_salary))
+    years = Decimal(str(service_years))
+
+    if years < Decimal("1.0"):
+        return {
+            "basic_salary": float(salary),
+            "service_years": float(years),
+            "total_gratuity": 0.0,
+            "currency": "AED",
+            "statutory_basis": "FDL_33_2021_A51_C2",
+        }
+
+    daily_wage = salary / Decimal("30")
+    first_5_years = min(years, Decimal("5.0"))
+    gratuity_first_5 = daily_wage * Decimal("21") * first_5_years
+
+    additional_years = max(Decimal("0.0"), years - Decimal("5.0"))
+    gratuity_additional = daily_wage * Decimal("30") * additional_years
+
+    total = (gratuity_first_5 + gratuity_additional).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    max_cap = salary * Decimal("24")  # 2 years total basic salary cap
+
+    final_amount = min(total, max_cap)
+
+    return {
+        "basic_salary": float(salary),
+        "service_years": float(years),
+        "total_gratuity": float(final_amount),
+        "currency": "AED",
+        "statutory_basis": "FDL_33_2021_A51_C2",
+    }

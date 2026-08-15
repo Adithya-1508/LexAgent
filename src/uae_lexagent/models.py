@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Literal
 
@@ -133,8 +134,6 @@ class LegalProvision(BaseModel):
             raise ValueError("English legal translations cannot be marked is_authoritative=True")
         if self.language == "en" and not self.translation_of:
             raise ValueError("English legal translations must specify translation_of pointing to Arabic provision ID")
-        if self.language == "ar" and self.translation_of is not None:
-            raise ValueError("Arabic legal provisions cannot point to a translation_of provision")
         if (
             self.page_start is not None
             and self.page_end is not None
@@ -213,3 +212,165 @@ class LegalResponse(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     fallback_reason: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# Evaluation & Benchmark Models
+# =============================================================================
+
+
+class BenchmarkCategory(str, Enum):
+    DIRECT_FACTUAL = "direct_factual"
+    MULTI_HOP = "multi_hop"
+    CODE_SWITCHED = "code_switched"
+    TOOL_CALCULATION = "tool_calculation"
+    ADVERSARIAL = "adversarial"
+    OUT_OF_SCOPE = "out_of_scope"
+    JURISDICTION_DISTRACTOR = "jurisdiction_distractor"
+    TEMPORAL_VERSIONING = "temporal_versioning"
+    CITATION_VERIFICATION = "citation_verification"
+
+
+class ExpectedClaim(BaseModel):
+    """A distinct legally-verifiable claim expected in the answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(min_length=1)
+    conclusion: str = Field(min_length=1)
+    required_conditions: list[str] = Field(default_factory=list)
+    exceptions: list[str] = Field(default_factory=list)
+
+
+class ExpectedCalculation(BaseModel):
+    """Deterministic mathematical expectation with decimal precision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    basic_salary: Decimal = Field(gt=0)
+    service_years: Decimal = Field(ge=0)
+    expected_amount: Decimal = Field(ge=0)
+    currency: str = Field(default="AED", min_length=1)
+    tolerance: Decimal = Field(default=Decimal("0.01"), ge=0)
+
+
+class ExpectedToolCall(BaseModel):
+    """Tool invocation expectation for computational questions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    calculation: ExpectedCalculation | None = None
+
+
+class BenchmarkCase(BaseModel):
+    """Ground-truth benchmark test case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = Field(default="1.0.0", min_length=1)
+    case_id: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    language: Language
+    category: BenchmarkCategory
+    expected_jurisdiction: Jurisdiction
+    expected_answerable: bool
+    abstention_reason: str | None = None
+    expected_provisions: list[str] = Field(default_factory=list)  # Canonical alignment_ids
+    expected_claims: list[ExpectedClaim] = Field(default_factory=list)
+    expected_tool: ExpectedToolCall | None = None
+    bilingual_pair_id: str | None = None
+    as_of: date | None = None
+    expected_corpus_version: str = Field(min_length=1)
+    adversarial_type: str | None = None
+    source_notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_case_consistency(self) -> "BenchmarkCase":
+        if not self.expected_answerable and not self.abstention_reason:
+            raise ValueError(f"Case '{self.case_id}' is marked expected_answerable=False but lacks abstention_reason")
+        if not self.expected_answerable and self.expected_provisions:
+            raise ValueError(f"Unanswerable case '{self.case_id}' cannot declare expected provisions")
+        if self.category == BenchmarkCategory.TEMPORAL_VERSIONING and self.as_of is None:
+            raise ValueError(f"Temporal case '{self.case_id}' must specify as_of date")
+        if self.category == BenchmarkCategory.ADVERSARIAL and not self.adversarial_type:
+            raise ValueError(f"Adversarial case '{self.case_id}' must specify adversarial_type")
+        if self.category == BenchmarkCategory.CODE_SWITCHED and self.language is not Language.MIXED:
+            raise ValueError(f"Code-switched case '{self.case_id}' must use language='mixed'")
+        if self.category == BenchmarkCategory.TOOL_CALCULATION:
+            if self.expected_tool is None or self.expected_tool.calculation is None:
+                raise ValueError(f"Tool-calculation case '{self.case_id}' requires expected calculation data")
+        return self
+
+
+class PredictedClaim(BaseModel):
+    """A claim emitted by the evaluated system with its supporting references."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str = Field(min_length=1)
+    conclusion: str = Field(min_length=1)
+    cited_alignment_ids: list[str] = Field(default_factory=list)
+    supported: bool | None = None
+
+
+class EvaluationPrediction(BaseModel):
+    """Standardized prediction output produced by an evaluated agent or retriever."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str = Field(min_length=1)
+    answerable: bool
+    jurisdiction: Jurisdiction
+    retrieved_alignment_ids: list[str] = Field(default_factory=list)
+    cited_alignment_ids: list[str] = Field(default_factory=list)
+    claims: list[PredictedClaim] = Field(default_factory=list)
+    tool_name: str | None = None
+    tool_arguments: dict[str, Any] = Field(default_factory=dict)
+    calculated_amount: Decimal | None = None
+    latency_ms: float = Field(ge=0.0)
+
+
+class DimensionScore(BaseModel):
+    """Score for a specific Shubhi Signal evaluation dimension."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: str = Field(min_length=1)
+    score: float | None = None
+    sample_count: int = Field(ge=0)
+    measured: bool = True
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ShubhiSignalScore(BaseModel):
+    """Composite Shubhi Signal benchmark scorecard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    benchmark_version: str = Field(min_length=1)
+    corpus_version: str = Field(min_length=1)
+    dimensions: list[DimensionScore] = Field(default_factory=list)
+    aggregate_score: float | None = None
+    weights: dict[str, float] = Field(default_factory=dict)
+    category_scores: dict[str, float] = Field(default_factory=dict)
+    language_scores: dict[str, float] = Field(default_factory=dict)
+
+
+class BenchmarkManifest(BaseModel):
+    """Integrity metadata for a benchmark dataset and its corpus snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    benchmark_id: str = Field(min_length=1)
+    schema_version: str = Field(min_length=1)
+    benchmark_version: str = Field(min_length=1)
+    corpus_version: str = Field(min_length=1)
+    corpus_fingerprint: str | None = Field(default=None, pattern=r"^[a-fA-F0-9]{64}$")
+    total_cases: int = Field(ge=1)
+    coverage_status: Literal["complete", "partial_mvp"]
+    created_at: datetime
+    category_distribution: dict[str, int] = Field(default_factory=dict)
+    dataset_path: str = Field(min_length=1)
+    dataset_sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")

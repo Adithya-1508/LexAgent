@@ -75,3 +75,29 @@ class InMemoryRetriever:
             for rank, (score, provision) in enumerate(scored[:top_k], start=1)
         ]
 
+    def retrieve(
+        self,
+        query: str | LegalQuery,
+        *,
+        top_k: int = 5,
+        jurisdiction: Jurisdiction | None = None,
+        as_of: date | None = None,
+        language: Language = Language.UNKNOWN,
+    ) -> list[LegalEvidence]:
+        """Convenience method accepting raw string queries."""
+        if isinstance(query, str):
+            legal_query = LegalQuery(
+                query_id="adhoc",
+                text=query,
+                language=language,
+                jurisdiction=jurisdiction or Jurisdiction.UNKNOWN,
+                as_of=as_of,
+            )
+        else:
+            legal_query = query
+
+        return self.search(
+            legal_query,
+            top_k=top_k,
+            jurisdiction=jurisdiction,
+        )
