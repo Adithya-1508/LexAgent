@@ -1,4 +1,4 @@
-"""Benchmark evaluator supporting both Baseline and Hybrid retrieval backends."""
+"""Benchmark evaluator supporting Baseline/Hybrid retrieval and Citation-Grounded Synthesis."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from ..models import (
     Jurisdiction,
     LegalProvision,
     LegalQuery,
+    PredictedClaim,
     ShubhiSignalScore,
 )
 from ..retrieval import (
@@ -28,6 +29,14 @@ from ..retrieval import (
     get_embedding_provider,
 )
 from ..routing import classify_jurisdiction
+from ..synthesis import (
+    CitationVerifier,
+    DeterministicTemplateGenerator,
+    GeneratorProtocol,
+    LegalSynthesisEngine,
+    VerificationStatus,
+    get_generator,
+)
 from ..tools import calculate_gratuity
 from .loader import (
     compute_corpus_fingerprint,
@@ -41,13 +50,15 @@ from .report import save_reports
 
 
 class BenchmarkEvaluator:
-    """Evaluator assessing retrieval, routing, and tools against the Shubhi Signal benchmark."""
+    """Evaluator assessing retrieval, synthesis grounding, routing, and tools against the benchmark."""
 
     def __init__(
         self,
         retriever: RetrieverProtocol,
         valid_alignment_ids: set[str],
         retriever_name: str = "baseline",
+        generator: GeneratorProtocol | None = None,
+        verification_mode: str = "strict",
         provisions: list[LegalProvision] | None = None,
         metadata: dict[str, object] | None = None,
     ) -> None:
@@ -56,16 +67,27 @@ class BenchmarkEvaluator:
         self.retriever_name = retriever_name
         self.provisions = provisions or []
         self.metadata = dict(metadata or {})
+        self.generator = generator or DeterministicTemplateGenerator()
+        self.verifier = CitationVerifier(
+            valid_corpus_alignment_ids=self.valid_alignment_ids,
+            strict=(verification_mode.casefold() == "strict"),
+        )
+        self.synthesis_engine = LegalSynthesisEngine(
+            retriever=self.retriever,
+            generator=self.generator,
+            verifier=self.verifier,
+            provisions=self.provisions,
+        )
 
     def predict_case(self, case: BenchmarkCase) -> EvaluationPrediction:
-        """Run routing, retrieval, and tools on a benchmark query."""
+        """Run routing, retrieval, grounded synthesis, and tools on a benchmark query."""
         start_time = time.perf_counter()
 
         # 1. Jurisdiction Routing
         decision = classify_jurisdiction(case.query)
         routed_jurisdiction = decision.jurisdiction
 
-        # 2. Retrieval using the declared protocol and complete query context
+        # 2. Complete query context
         legal_query = LegalQuery(
             query_id=case.case_id,
             text=case.query,
@@ -73,13 +95,38 @@ class BenchmarkEvaluator:
             jurisdiction=routed_jurisdiction,
             as_of=case.as_of,
         )
-        evidence = self.retriever.search(legal_query, top_k=5)
-        retrieved_alignment_ids: list[str] = []
-        for ev in evidence:
-            if ev.provision.alignment_id and ev.provision.alignment_id not in retrieved_alignment_ids:
-                retrieved_alignment_ids.append(ev.provision.alignment_id)
 
-        # 3. Tool evaluation based on query intent
+        # 3. Grounded Synthesis & Citation Verification Gate
+        grounded_answer = self.synthesis_engine.synthesize(legal_query)
+
+        # 4. Extract retrieved alignment IDs
+        retrieved_alignment_ids: list[str] = []
+        for ev in grounded_answer.referenced_evidence:
+            align_id = ev.provision.alignment_id or ev.provision.provision_id
+            if align_id not in retrieved_alignment_ids:
+                retrieved_alignment_ids.append(align_id)
+
+        # 5. Extract verified cited alignment IDs
+        cited_alignment_ids: list[str] = []
+        for c in grounded_answer.claims:
+            if c.verification_status == VerificationStatus.VERIFIED:
+                for cid in c.cited_alignment_ids:
+                    if cid not in cited_alignment_ids:
+                        cited_alignment_ids.append(cid)
+
+        # 6. Extract structured claims
+        predicted_claims: list[PredictedClaim] = [
+            PredictedClaim(
+                claim_id=c.claim_id,
+                claim_key=c.claim_key,
+                conclusion=c.conclusion,
+                cited_alignment_ids=c.cited_alignment_ids,
+                supported=(c.verification_status == VerificationStatus.VERIFIED),
+            )
+            for c in grounded_answer.claims
+        ]
+
+        # 7. Tool evaluation based on query intent
         tool_name = None
         tool_arguments = {}
         calc_amount = None
@@ -105,17 +152,15 @@ class BenchmarkEvaluator:
             except Exception:
                 pass
 
-        # 4. Answerability heuristic must remain independent of benchmark labels.
-        answerable = _is_answerable(case.query, routed_jurisdiction, self.provisions, case.as_of)
-
         latency_ms = (time.perf_counter() - start_time) * 1000.0
 
         return EvaluationPrediction(
             case_id=case.case_id,
-            answerable=answerable,
+            answerable=grounded_answer.answerable,
             jurisdiction=routed_jurisdiction,
             retrieved_alignment_ids=retrieved_alignment_ids,
-            cited_alignment_ids=retrieved_alignment_ids[:2] if answerable else [],
+            cited_alignment_ids=cited_alignment_ids,
+            claims=predicted_claims,
             tool_name=tool_name,
             tool_arguments=tool_arguments,
             calculated_amount=calc_amount,
@@ -158,58 +203,6 @@ class BaselineEvaluator(BenchmarkEvaluator):
         )
 
 
-def _is_answerable(
-    query: str,
-    jurisdiction: Jurisdiction,
-    provisions: list[LegalProvision],
-    as_of: date | None = None,
-) -> bool:
-    """Conservative answerability gate independent of benchmark labels."""
-    if jurisdiction is not Jurisdiction.UAE_ONSHORE:
-        return False
-
-    lowered = query.casefold()
-    out_of_scope_terms = (
-        "domestic worker",
-        "domestic workers",
-        "federal civil servant",
-        "federal government employee",
-        "criminal offense",
-        "criminal offence",
-        "العمالة المساعدة",
-        "موظف حكومي",
-        "الجريمة",
-    )
-    if any(term in lowered for term in out_of_scope_terms):
-        return False
-
-    article_numbers = {
-        provision.article
-        for provision in provisions
-        if provision.jurisdiction is Jurisdiction.UAE_ONSHORE
-    }
-    article_matches = re.findall(
-        r"(?:article|المادة)\s*\(?\s*(\d+)\s*\)?",
-        lowered,
-        re.IGNORECASE,
-    )
-    if article_matches and any(number not in article_numbers for number in article_matches):
-        return False
-
-    if as_of is not None:
-        valid_provisions = [
-            provision
-            for provision in provisions
-            if provision.jurisdiction is Jurisdiction.UAE_ONSHORE
-            and (provision.effective_from is None or as_of >= provision.effective_from)
-            and (provision.effective_until is None or as_of <= provision.effective_until)
-        ]
-        if not valid_provisions:
-            return False
-
-    return True
-
-
 def run_evaluation(
     benchmark_path: Path,
     output_json: Path,
@@ -218,8 +211,10 @@ def run_evaluation(
     retriever_type: str = "baseline",
     embedding_type: str = "hash",
     reranker_type: str = "identity",
+    generator_type: str = "deterministic",
+    verification_mode: str = "strict",
 ) -> ShubhiSignalScore:
-    """Run benchmark evaluation with selected retriever and embedding configuration."""
+    """Run benchmark evaluation with selected retriever, generator, and verification configuration."""
     project_root = Path(__file__).resolve().parents[3]
     data_dir = project_root / "data" / "official_sources"
     fdl_provisions = load_provisions(data_dir / "fdl_33_2021_provisions.json")
@@ -241,6 +236,7 @@ def run_evaluation(
         raise ValueError(f"Benchmark integrity validation failed with {len(issues)} issues:\n" + "\n".join(issues))
 
     valid_alignment_ids = {p.alignment_id for p in all_provisions if p.alignment_id}
+    generator = get_generator(generator_type=generator_type)
 
     retriever_type_clean = retriever_type.casefold().strip()
     if retriever_type_clean not in {"baseline", "hybrid"}:
@@ -259,22 +255,40 @@ def run_evaluation(
         reranker = SentenceTransformerReranker() if reranker_type_clean == "cross-encoder" else IdentityReranker()
         retriever = HybridLegalRetriever(index=index, reranker=reranker)
         evaluator = BenchmarkEvaluator(
-            retriever,
+            retriever=retriever,
             valid_alignment_ids=valid_alignment_ids,
             retriever_name="hybrid",
+            generator=generator,
+            verification_mode=verification_mode,
             provisions=all_provisions,
             metadata={
                 "retriever": "hybrid",
                 "embedding_provider": type(embedder).__name__,
                 "embedding_model": embedder.model_id,
                 "reranker": type(reranker).__name__,
+                "generator": type(generator).__name__,
+                "verification_mode": verification_mode,
                 "corpus_fingerprint": index.corpus_fingerprint,
                 "corpus_version": index.corpus_version,
             },
         )
     else:
         retriever = InMemoryRetriever(all_provisions)
-        evaluator = BaselineEvaluator(all_provisions)
+        evaluator = BenchmarkEvaluator(
+            retriever=retriever,
+            valid_alignment_ids=valid_alignment_ids,
+            retriever_name="baseline",
+            generator=generator,
+            verification_mode=verification_mode,
+            provisions=all_provisions,
+            metadata={
+                "retriever": "baseline",
+                "generator": type(generator).__name__,
+                "verification_mode": verification_mode,
+                "corpus_fingerprint": compute_corpus_fingerprint(all_provisions),
+                "corpus_version": corpus_version,
+            },
+        )
 
     score, predictions = evaluator.evaluate(
         cases,
@@ -295,16 +309,21 @@ def run_evaluation(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="UAE-LexAgent Benchmark Evaluator (Baseline vs Hybrid)")
+    parser = argparse.ArgumentParser(description="UAE-LexAgent Benchmark Evaluator (Retrieval + Grounded Synthesis)")
     parser.add_argument("--benchmark", type=Path, default=Path("data/evaluation/benchmark_queries.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("reports/benchmark_results.json"))
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark_report.md"))
     parser.add_argument("--retriever", choices=["baseline", "hybrid"], default="hybrid")
     parser.add_argument("--embedding", choices=["hash", "sentence-transformer", "openai"], default="hash")
     parser.add_argument("--reranker", choices=["identity", "cross-encoder"], default="identity")
+    parser.add_argument("--generator", choices=["deterministic", "openai", "anthropic", "ollama", "vllm"], default="deterministic")
+    parser.add_argument("--verification", choices=["strict", "permissive"], default="strict")
     args = parser.parse_args()
 
-    print(f"Running Benchmark with: retriever={args.retriever}, embedding={args.embedding}, reranker={args.reranker}")
+    print(
+        f"Running Benchmark: retriever={args.retriever}, embedding={args.embedding}, "
+        f"generator={args.generator}, verification={args.verification}"
+    )
     score = run_evaluation(
         benchmark_path=args.benchmark,
         output_json=args.output,
@@ -312,6 +331,8 @@ def main() -> None:
         retriever_type=args.retriever,
         embedding_type=args.embedding,
         reranker_type=args.reranker,
+        generator_type=args.generator,
+        verification_mode=args.verification,
     )
     print("Evaluation Complete!")
     if score.aggregate_score is not None:

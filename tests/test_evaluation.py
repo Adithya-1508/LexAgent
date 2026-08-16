@@ -218,8 +218,9 @@ def test_shubhi_signal_aggregation_handles_unmeasured_dimensions() -> None:
     assert 0.0 <= score.aggregate_score <= 1.0
 
     grounding_dim = next(d for d in score.dimensions if d.dimension == "grounding")
-    assert grounding_dim.measured is False
-    assert grounding_dim.score is None
+    assert grounding_dim.measured is True
+    assert grounding_dim.score is not None
+    assert 0.0 <= grounding_dim.score <= 1.0
     assert any(d.dimension == "multi_hop" for d in score.dimensions)
     assert score.weights["latency"] > 0
 

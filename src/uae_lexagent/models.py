@@ -232,12 +232,22 @@ class BenchmarkCategory(str, Enum):
     CITATION_VERIFICATION = "citation_verification"
 
 
+class AdversarialType(str, Enum):
+    OUT_OF_JURISDICTION = "out_of_jurisdiction"
+    NON_EXISTENT_ARTICLE = "non_existent_article"
+    COUNTERFACTUAL_PREMISE = "counterfactual_premise"
+    JURISDICTION_DISTRACTOR = "jurisdiction_distractor"
+    TEMPORAL_VERSIONING = "temporal_versioning"
+    CITATION_VERIFICATION = "citation_verification"
+
+
 class ExpectedClaim(BaseModel):
     """A distinct legally-verifiable claim expected in the answer."""
 
     model_config = ConfigDict(extra="forbid")
 
     claim_id: str = Field(min_length=1)
+    claim_key: str = Field(default="")
     conclusion: str = Field(min_length=1)
     required_conditions: list[str] = Field(default_factory=list)
     exceptions: list[str] = Field(default_factory=list)
@@ -311,6 +321,7 @@ class PredictedClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     claim_id: str = Field(min_length=1)
+    claim_key: str = Field(default="")
     conclusion: str = Field(min_length=1)
     cited_alignment_ids: list[str] = Field(default_factory=list)
     supported: bool | None = None

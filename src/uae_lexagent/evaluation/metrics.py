@@ -131,16 +131,27 @@ def compute_grounding_metrics(
         if not case or not case.expected_claims:
             continue
         evaluated_cases += 1
-        expected_by_id = {claim.claim_id: claim for claim in case.expected_claims}
-        predicted_claim_count += len(prediction.claims)
-        expected_claim_count += len(expected_by_id)
         expected_provisions = set(case.expected_provisions)
+        predicted_claim_count += len(prediction.claims)
+        expected_claim_count += len(case.expected_claims)
+        unmatched_expected = list(case.expected_claims)
         for claim in prediction.claims:
-            expected = expected_by_id.get(claim.claim_id)
-            if not expected:
+            matched = None
+            for expected in unmatched_expected:
+                if claim.claim_key and expected.claim_key:
+                    key_match = claim.claim_key == expected.claim_key
+                else:
+                    # Legacy hand-built cases may not have semantic keys;
+                    # benchmark records use claim_key for one-to-one matching.
+                    key_match = claim.claim_id == expected.claim_id
+                if key_match:
+                    matched = expected
+                    break
+            if matched is None:
                 continue
+            unmatched_expected.remove(matched)
             has_expected_evidence = bool(set(claim.cited_alignment_ids) & expected_provisions)
-            if claim.supported is not False and (has_expected_evidence or not expected_provisions):
+            if claim.supported is True and (has_expected_evidence or not expected_provisions):
                 grounded_claim_count += 1
 
     if not evaluated_cases or not predicted_claim_count:
@@ -348,18 +359,17 @@ def compute_bilingual_consistency(
             top_en == top_ar
             and (not expected or (expected & top_en and expected & top_ar))
         )
-        claim_ids_match = {claim.claim_id for claim in p_en.claims} == {claim.claim_id for claim in p_ar.claims}
         en_claim_state = {
-            (claim.claim_id, claim.supported, bool(set(claim.cited_alignment_ids) & expected))
+            (claim.claim_key or claim.claim_id, claim.supported, bool(set(claim.cited_alignment_ids) & expected))
             for claim in p_en.claims
         }
         ar_claim_state = {
-            (claim.claim_id, claim.supported, bool(set(claim.cited_alignment_ids) & expected))
+            (claim.claim_key or claim.claim_id, claim.supported, bool(set(claim.cited_alignment_ids) & expected))
             for claim in p_ar.claims
         }
         claim_state_match = en_claim_state == ar_claim_state
 
-        if jurisdiction_match and answerability_match and retrieval_overlap and claim_ids_match and claim_state_match:
+        if jurisdiction_match and answerability_match and retrieval_overlap and claim_state_match:
             consistent_pairs += 1
 
     score = (consistent_pairs / total_pairs) if total_pairs > 0 else 0.0
