@@ -218,7 +218,7 @@ def test_article_51_and_66_no_longer_merge_numbered_clauses() -> None:
 
 def test_source_path_escape_is_rejected() -> None:
     sources = load_source_manifest(DATA_DIR / "manifest.json")
-    sources[0].local_path = "..\\outside.txt"
+    sources[0].local_path = "../outside.txt"
 
     issues = validate_source_manifest(sources, base_dir=PROJECT_ROOT)
     assert any("escapes the configured base directory" in issue for issue in issues)

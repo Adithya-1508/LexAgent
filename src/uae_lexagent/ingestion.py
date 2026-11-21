@@ -65,7 +65,8 @@ def validate_source_manifest(
                 f"does not belong to an approved official domain."
             )
 
-        file_path = Path(source.local_path)
+        norm_path = source.local_path.replace("\\", "/")
+        file_path = Path(norm_path)
         if base_dir:
             root = base_dir.resolve()
             file_path = (file_path if file_path.is_absolute() else root / file_path).resolve()

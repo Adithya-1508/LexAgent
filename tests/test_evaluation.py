@@ -45,9 +45,11 @@ def test_benchmark_manifest_and_jsonl_load() -> None:
     cases = load_benchmark_cases(BENCHMARK_PATH)
     assert len(cases) == 200
 
-    # Verify SHA256 matches manifest
-    file_hash = hashlib.sha256(BENCHMARK_PATH.read_bytes()).hexdigest()
-    assert file_hash == manifest["dataset_sha256"]
+    # Verify SHA256 matches manifest (supporting both raw and LF-normalized hashes across OS platforms)
+    raw_bytes = BENCHMARK_PATH.read_bytes()
+    actual_hash_raw = hashlib.sha256(raw_bytes).hexdigest()
+    actual_hash_lf = hashlib.sha256(raw_bytes.replace(b"\r\n", b"\n")).hexdigest()
+    assert manifest["dataset_sha256"] in {actual_hash_raw, actual_hash_lf}
 
     provisions = load_provisions(DATA_DIR / "official_sources" / "fdl_33_2021_provisions.json")
     provisions += load_provisions(

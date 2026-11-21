@@ -70,8 +70,11 @@ def validate_benchmark_manifest(
 ) -> list[str]:
     """Verify dataset hash, counts, distribution, and corpus fingerprint."""
     issues: list[str] = []
-    actual_hash = hashlib.sha256(benchmark_path.read_bytes()).hexdigest()
-    if actual_hash.casefold() != manifest.dataset_sha256.casefold():
+    raw_bytes = benchmark_path.read_bytes()
+    actual_hash_raw = hashlib.sha256(raw_bytes).hexdigest()
+    actual_hash_lf = hashlib.sha256(raw_bytes.replace(b"\r\n", b"\n")).hexdigest()
+    manifest_hash = manifest.dataset_sha256.casefold()
+    if manifest_hash not in {actual_hash_raw.casefold(), actual_hash_lf.casefold()}:
         issues.append("Benchmark dataset SHA256 does not match its manifest.")
     if manifest.total_cases != len(cases):
         issues.append(f"Manifest declares {manifest.total_cases} cases but loaded {len(cases)}.")
