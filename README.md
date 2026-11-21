@@ -16,10 +16,12 @@ The system is designed around a simple principle:
   - Step 5: Auditable multi-step reasoning agent with deterministic & LangGraph dual-runtime support.
 - **Current Milestone — Phase 5.1 (Correctness & Safety Hardening)**:
   - Implemented on feature branch `fix/phase-5-1-correctness-safety`, currently **awaiting pull request review and acceptance**.
-  - Enforces statutory gratuity eligibility (GPSSA pension exclusions, 1-year service threshold, 24-month basic wage cap).
-  - Hardens citation verification against contradictory tool calculations and unverified text leakage.
-  - Sanitizes internal exception disclosure in agent execution traces.
-  - Establishes enterprise GitHub Actions CI pipeline across linting, type-checking, tests, and packaging.
+  - **Corpus Scope**: Grounded against current MVP corpus: 13 core employment articles of Federal Decree-Law No. 33 of 2021 (Articles 1, 7, 8, 9, 10, 16, 17, 30, 42, 43, 51, 53, 66) and Cabinet Resolution No. 1 of 2022 (Article 30).
+  - **Strict Citation Verification Gate**: Enforces citation existence in corpus, presence in retrieved context, jurisdiction compatibility (UAE onshore only), temporal validity (`effective_from` / `effective_until`), statutory subject alignment (`employer` vs `worker`), statutory polarity limits ("shall not exceed"), and strict numeric consistency.
+  - **Statutory Gratuity Hardening**: Validates finite and positive numerical bounds, detects UAE national / Emirati worker pension exclusions (Article 51(1)), part-time work patterns under Cabinet Resolution No. 1 of 2022 Article 30, and deducts unpaid absences (Article 51(2)).
+  - **Fail-Closed Finalization Policy**: Prevents partial or contradicted draft release; any gate failure forces `answerable=False`, confidence `0.0`, empty evidence, and an explicit `**Abstention Notice**`.
+  - **Audit Trail & Privacy**: Sanitizes internal exception disclosure and redacts sensitive tokens, keys, and passwords from agent trace records.
+  - **Multi-Job GitHub Actions CI Pipeline**: 7 dedicated jobs across Python 3.11 and 3.12 (linting, formatting, static type checking, unit tests, legal safety invariants, integrity validation, dependency isolation, wheel packaging, and Bandit security scans).
 - **Upcoming Milestones**:
   - Phase 5.2: Authoritative Corpus Reliability (full 74-article FDL 33/2021 ingestion).
   - Phase 6: Production dense multilingual retrieval & Qdrant integration.
@@ -85,13 +87,15 @@ python -m build --sdist --wheel
 
 ### GitHub Actions CI Pipeline
 
-The CI workflow (`.github/workflows/ci.yml`) runs on every push to any branch, pull requests targeting `main`, and manual dispatches:
+The CI workflow (`.github/workflows/ci.yml`) triggers on pushes to `main`, pull requests targeting `main`, and manual dispatches (preventing duplicate workflow executions on feature branches):
 
-1. **Lint & Formatting**: Validates code with Ruff linter and format checker.
-2. **Static Type Analysis**: Evaluates `src/` against mypy strict definitions with zero blanket ignores.
-3. **Unit & Integration Tests**: Runs pytest on Python 3.12, emitting JUnit XML test reports uploaded as workflow artifacts.
-4. **Packaging Validation**: Builds source distribution and binary wheel, confirming installation in a clean environment.
-5. **Optional Dependency Matrix**: Tests core minimal installation, retrieval/Qdrant subset, and agent/LangGraph runtime independently.
+1. **Lint, Format & Static Type Analysis (`quality`)**: Validates code with Ruff linter, Ruff format checker, and mypy strict analysis with zero blanket ignores.
+2. **Unit & Integration Tests (`unit-tests`)**: Runs the full pytest test suite across Python 3.11 and 3.12, emitting JUnit XML test reports uploaded as workflow artifacts.
+3. **Legal Safety & Invariant Tests (`legal-safety`)**: Executes dedicated statutory safety tests (`pytest -m legal_safety`) verifying fail-closed jurisdiction gating, temporal validity, predicate fact checking, and calculation limits.
+4. **Corpus & Benchmark Integrity Check (`corpus-benchmark-integrity`)**: Validates corpus and benchmark JSON/JSONL manifests, cryptographic checksums, and bilingual symmetry.
+5. **Isolated Dependencies (`dependency-isolation`)**: Tests core minimal installation (`.[dev]`), retrieval/Qdrant subset (`.[dev,retrieval,qdrant]`), and agent/LangGraph runtime (`.[dev,retrieval,agent]`) in strict isolation.
+6. **Distribution Package & Clean Installation (`packaging`)**: Builds source distribution and binary wheel, confirming installation in a clean environment and running an import smoke test.
+7. **Security Vulnerability Scan (`security-scan`)**: Runs Bandit static security analysis (`bandit -r src/ -ll -q`) to detect security vulnerabilities and unsafe coding patterns.
 
 ### Contribution Workflow
 

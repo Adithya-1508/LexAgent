@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from enum import Enum
 from typing import Any, Literal
@@ -17,6 +18,18 @@ from ..models import (
     ToolCall,
 )
 from ..synthesis.contracts import GeneratedLegalAnswer, GroundedLegalAnswer
+
+_SENSITIVE_DATA_PATTERN = re.compile(
+    r"(?:bearer\s+[a-zA-Z0-9_\-\.]+|[a-zA-Z0-9_\-\.]{25,}|password[:=]\s*\S+|token[:=]\s*\S+)",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_trace_text(text: str) -> str:
+    """Mask credentials, tokens, or raw secrets from trace text."""
+    if not text:
+        return ""
+    return _SENSITIVE_DATA_PATTERN.sub("[REDACTED]", text)
 
 
 class AgentIntent(str, Enum):
@@ -73,9 +86,12 @@ class AgentState(BaseModel):
 
     # Retry, Budgets & Limits
     step_count: int = 0
+    execution_steps: int = 0
     verification_attempts: int = 0
     max_attempts: int = Field(default=2, ge=1, le=10)
     max_steps: int = Field(default=20, ge=1, le=100)
+    max_execution_steps: int = Field(default=20, ge=1, le=100)
+    max_trace_steps: int = Field(default=50, ge=10, le=200)
     max_sub_queries: int = Field(default=4, ge=1, le=20)
     max_evidence_items: int = Field(default=10, ge=1, le=100)
     timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
@@ -100,18 +116,34 @@ class AgentState(BaseModel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Append an immutable, privacy-safe audit record to trace."""
-        if len(self.trace) >= self.max_steps:
+        is_terminal = node_name in ("abstain_node", "finalize_node")
+        # Reserve 2 terminal slots so abstain_node and finalize_node are always auditable
+        capacity = self.max_trace_steps if is_terminal else max(0, self.max_trace_steps - 2)
+        if len(self.trace) >= capacity:
             return
+
+        sanitized_input = _sanitize_trace_text(input_summary)[:200]
+        sanitized_output = _sanitize_trace_text(output_summary)[:200]
+        sanitized_rationale = _sanitize_trace_text(rationale)
+
+        sanitized_meta = {}
+        if metadata:
+            for k, v in metadata.items():
+                if isinstance(v, str):
+                    sanitized_meta[k] = _sanitize_trace_text(v)
+                else:
+                    sanitized_meta[k] = v
+
         step = AgentTraceStep(
             step_index=len(self.trace),
             node_name=node_name,
             action=action,
             status=status,
-            rationale=rationale,
+            rationale=sanitized_rationale,
             duration_ms=round(duration_ms, 3),
-            input_summary=input_summary[:200],
-            output_summary=output_summary[:200],
-            metadata=metadata or {},
+            input_summary=sanitized_input,
+            output_summary=sanitized_output,
+            metadata=sanitized_meta,
         )
         self.trace.append(step)
 
@@ -120,5 +152,5 @@ class AgentState(BaseModel):
         return (time.perf_counter() - self.start_time) >= self.timeout_seconds
 
     def has_step_budget(self) -> bool:
-        """Check if agent has remaining step budget."""
-        return len(self.trace) < self.max_steps
+        """Check if agent has remaining step budget for state machine execution."""
+        return self.step_count < self.max_steps and self.execution_steps < self.max_execution_steps

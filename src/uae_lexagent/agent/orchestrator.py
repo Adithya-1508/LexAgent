@@ -88,6 +88,7 @@ class LegalAgentOrchestrator:
             query=q,
             max_attempts=self.max_attempts,
             max_steps=self.max_steps,
+            max_execution_steps=self.max_steps,
             timeout_seconds=self.timeout_seconds,
         )
 

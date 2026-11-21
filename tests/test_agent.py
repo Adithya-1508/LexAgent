@@ -575,11 +575,11 @@ def test_maximum_graph_step_enforcement(
     canonical_provisions: list[LegalProvision],
 ) -> None:
     query = LegalQuery(query_id="Q_MAX_STEPS", text="Sample query")
-    state = AgentState(query=query, max_steps=2)
+    state = AgentState(query=query, max_steps=2, max_execution_steps=2)
 
-    # Fill state with 2 trace steps to exhaust budget
-    state.add_trace("step1", "act", "done", "first", 1.0)
-    state.add_trace("step2", "act", "done", "second", 1.0)
+    # Exhaust execution budget
+    state.execution_steps = 2
+    state.step_count = 2
 
     assert not state.has_step_budget()
     state = retrieval_node(state, retriever, canonical_provisions)
@@ -856,8 +856,10 @@ def test_agent_trace_respects_step_budget(
         max_steps=1,
     ).run("Under UAE Labour Law, what is the maximum probation period?")
     assert response.answerable is False
-    assert len(response.trace) <= 1
     assert response.fallback_reason == "exhausted_budget"
+    # Terminal abstention and finalization steps are preserved in trace even when step budget is 1
+    assert any(s.node_name == "abstain_node" for s in response.trace)
+    assert any(s.node_name == "finalize_node" for s in response.trace)
 
 
 def test_tool_calculation_contradiction_overwrites_full_text(

@@ -37,6 +37,9 @@ agent = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "legal_safety: strict legal safety, jurisdiction, temporal, and adversarial regression tests",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint & Formatting
+  quality:
+    name: Lint, Format & Static Type Analysis
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,19 +29,58 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install lint dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
 
-      - name: Run Ruff lint checks
+      - name: Run Ruff lint check
         run: python -m ruff check .
 
       - name: Run Ruff format check
         run: python -m ruff format --check .
 
-  type-check:
-    name: Static Type Analysis (mypy)
+      - name: Run Mypy static type analysis
+        run: python -m mypy src/
+
+  unit-tests:
+    name: Unit & Integration Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+
+      - name: Run test suite with JUnit XML
+        run: |
+          mkdir -p reports
+          python -m pytest -q --junitxml=reports/test-results-${{ matrix.python-version }}.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-py${{ matrix.python-version }}
+          path: reports/test-results-${{ matrix.python-version }}.xml
+          retention-days: 14
+
+  legal-safety:
+    name: Legal Safety & Invariant Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -54,18 +93,18 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install all typed dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+          python -m pip install -e ".[dev,retrieval,agent]"
 
-      - name: Run mypy
-        run: python -m mypy src/
+      - name: Run legal safety tests
+        run: python -m pytest -q -m legal_safety
 
-  test:
-    name: Unit & Integration Tests
+  corpus-benchmark-integrity:
+    name: Corpus & Benchmark Integrity Check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -76,26 +115,51 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install test dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+          python -m pip install -e ".[dev,retrieval,agent]"
 
-      - name: Run test suite with JUnit XML output
-        run: |
-          mkdir -p reports
-          python -m pytest -q --junitxml=reports/test-results.xml
+      - name: Validate corpus manifests, checksums, and evaluation loader
+        run: python -m pytest -q tests/test_evaluation.py tests/test_ingestion.py
 
-      - name: Upload test results artifact
-        uses: actions/upload-artifact@v4
-        if: always()
+  dependency-isolation:
+    name: Isolated Dependencies (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "core-minimal"
+            install: ".[dev]"
+            test_target: "tests/test_models.py tests/test_ingestion.py tests/test_tools.py tests/test_routing.py"
+          - name: "retrieval-qdrant"
+            install: ".[dev,retrieval,qdrant]"
+            test_target: "tests/test_retrieval.py"
+          - name: "agent-orchestrator"
+            install: ".[dev,retrieval,agent]"
+            test_target: "tests/test_agent.py tests/test_synthesis.py tests/test_legal_safety.py"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          name: test-results-py312
-          path: reports/test-results.xml
-          retention-days: 14
+          python-version: "3.12"
+          cache: "pip"
 
-  package:
-    name: Packaging & Distribution Validation
+      - name: Install isolated target subset
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "${{ matrix.install }}"
+
+      - name: Run targeted test suite
+        run: python -m pytest -q ${{ matrix.test_target }}
+
+  packaging:
+    name: Distribution Package & Clean Installation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -116,28 +180,15 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build --sdist --wheel
 
-      - name: Test clean wheel installation
+      - name: Test clean wheel installation in isolated environment
         run: |
           python -m pip install dist/*.whl
           python -c "import uae_lexagent; print('Installed uae-lexagent successfully from', uae_lexagent.__file__)"
 
-  optional-matrix:
-    name: Optional Dependencies (${{ matrix.name }})
+  security-scan:
+    name: Security Vulnerability Scan (Bandit)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: "core-minimal"
-            install: ".[dev]"
-            test_target: "tests/test_models.py tests/test_ingestion.py tests/test_tools.py tests/test_routing.py"
-          - name: "retrieval-qdrant"
-            install: ".[dev,retrieval,qdrant]"
-            test_target: "tests/test_retrieval.py"
-          - name: "agent-orchestrator"
-            install: ".[dev,retrieval,agent]"
-            test_target: "tests/test_agent.py tests/test_synthesis.py"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -148,10 +199,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install subset ${{ matrix.name }}
+      - name: Install Bandit
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e "${{ matrix.install }}"
+          python -m pip install bandit
 
-      - name: Run targeted test suite
-        run: python -m pytest -q ${{ matrix.test_target }}
+      - name: Run Bandit static security scan
+        run: bandit -r src/ -ll -q

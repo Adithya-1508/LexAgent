@@ -55,6 +55,7 @@ def analyze_node(
     """Analyze query text, classify jurisdiction, check answerability, and decompose multi-hop intents."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
 
     # 1. Language Detection
     lang, out_lang = _detect_language(state.query.text)
@@ -120,12 +121,20 @@ def analyze_node(
 
     if has_calc_intent:
         state.intent = AgentIntent.CALCULATION
-        state.sub_queries = [
+        sub_qs = [
             localized_subquery(
                 "Under UAE Labour Law, how is end of service gratuity calculated under Article 51?",
                 "بموجب قانون العمل الإماراتي، كيف تحسب مكافأة نهاية الخدمة وفقاً للمادة 51؟",
             )
         ]
+        if bool(re.search(r"\b(part[-\s]?time|دوام\s+جزئي|عمل\s+جزئي)\b", query_cf)):
+            sub_qs.append(
+                localized_subquery(
+                    "Under Cabinet Resolution No. 1 of 2022 Article 30, how is part-time gratuity calculated?",
+                    "بموجب قرار مجلس الوزراء رقم 1 لسنة 2022 المادة 30، كيف تحسب مكافأة نهاية الخدمة للعمل الجزئي؟",
+                )
+            )
+        state.sub_queries = sub_qs
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         state.add_trace(
             node_name="analyze_node",
@@ -214,6 +223,7 @@ def retrieval_node(
     """Execute hybrid retrieval for all pending sub-queries with hard metadata pre-filtering."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
 
     if state.is_timed_out() or not state.has_step_budget():
         state.current_status = AgentStatus.ABSTAINED
@@ -256,14 +266,14 @@ def retrieval_node(
                 ),
             )
         except Exception as exc:
-            state.errors.append(f"Retrieval failure for sub-query: {exc}")
+            state.errors.append(f"Retrieval failure: {type(exc).__name__}")
             state.current_status = AgentStatus.ABSTAINED
             state.abstention_reason = "retrieval_failure"
             state.add_trace(
                 "retrieval_node",
                 "search_and_validate",
                 "failed",
-                "A retrieval backend failed; no partial answer will be synthesized.",
+                f"Retrieval backend raised {type(exc).__name__}; no partial answer will be synthesized.",
                 (time.perf_counter() - start_time) * 1000.0,
             )
             return state
@@ -420,6 +430,7 @@ def tool_node(state: AgentState) -> AgentState:
     """Execute statutory calculation tools gated by verified legal basis in retrieved evidence."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
 
     # Tool execution must only proceed if legal basis is present in retrieved evidence
     gratuity_basis = "FDL_33_2021_A51_C2"
@@ -453,12 +464,41 @@ def tool_node(state: AgentState) -> AgentState:
             salary_val = Decimal(salary_match.group(1))
             years_val = Decimal(years_match.group(1))
 
+            if (
+                not salary_val.is_finite()
+                or not years_val.is_finite()
+                or salary_val <= Decimal("0")
+                or years_val < Decimal("0")
+            ):
+                state.errors.append("Invalid tool input: values must be positive and finite.")
+                state.current_status = AgentStatus.ABSTAINED
+                state.abstention_reason = "invalid_tool_input"
+                return state
+
+            is_uae_national = bool(
+                re.search(r"\b(emirati|uae\s+national|local\s+citizen|مواطن|إماراتي)\b", query_cf)
+            )
+            is_part_time = bool(re.search(r"\b(part[-\s]?time|دوام\s+جزئي|عمل\s+جزئي)\b", query_cf))
+            work_pattern: Literal["full_time", "part_time"] = (
+                "part_time" if is_part_time else "full_time"
+            )
+
+            absence_match = re.search(
+                r"(?:unpaid\s+leave|unpaid\s+absence|غياب\s+بدون\s+راتب|إجازة\s+بدون\s+راتب)\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)",
+                query_cf,
+            )
+            unpaid_absence_days = Decimal(absence_match.group(1)) if absence_match else Decimal("0")
+
             for prior_call in state.tool_calls:
                 if (
                     prior_call.tool_name == "calculate_gratuity"
                     and prior_call.valid_schema
                     and prior_call.arguments.get("basic_salary") == float(salary_val)
                     and prior_call.arguments.get("service_years") == float(years_val)
+                    and prior_call.arguments.get("is_uae_national") == is_uae_national
+                    and prior_call.arguments.get("work_pattern") == work_pattern
+                    and prior_call.arguments.get("unpaid_absence_days")
+                    == float(unpaid_absence_days)
                 ):
                     state.tool_results = prior_call.result or {}
                     state.add_trace(
@@ -471,20 +511,36 @@ def tool_node(state: AgentState) -> AgentState:
                     return state
 
             # Validate input bounds
-            GratuityInput(basic_salary=salary_val, service_years=years_val)
+            GratuityInput(
+                basic_salary=salary_val,
+                service_years=years_val,
+                work_pattern=work_pattern,
+                is_uae_national=is_uae_national,
+                unpaid_absence_days=unpaid_absence_days,
+            )
 
-            calc_res = calculate_gratuity(salary_val, years_val)
+            calc_res = calculate_gratuity(
+                salary_val,
+                years_val,
+                is_uae_national=is_uae_national,
+                work_pattern=work_pattern,
+                unpaid_absence_days=unpaid_absence_days,
+            )
             exec_latency_ms = (time.perf_counter() - start_time) * 1000.0
 
+            basis_used = calc_res.get("statutory_basis", gratuity_basis)
             tool_call = ToolCall(
                 tool_name="calculate_gratuity",
                 arguments={
                     "basic_salary": float(salary_val),
                     "service_years": float(years_val),
+                    "is_uae_national": is_uae_national,
+                    "work_pattern": work_pattern,
+                    "unpaid_absence_days": float(unpaid_absence_days),
                 },
                 result=calc_res,
                 valid_schema=True,
-                statutory_basis=gratuity_basis,
+                statutory_basis=basis_used,
                 execution_latency_ms=exec_latency_ms,
             )
             state.tool_calls.append(tool_call)
@@ -495,7 +551,7 @@ def tool_node(state: AgentState) -> AgentState:
                 node_name="tool_node",
                 action="execute_gratuity",
                 status="success",
-                rationale=f"Calculated statutory gratuity AED {calc_res['total_gratuity']} anchored to {gratuity_basis}.",
+                rationale=f"Calculated statutory gratuity AED {calc_res['total_gratuity']} anchored to {basis_used}.",
                 duration_ms=duration_ms,
                 output_summary=f"Result: {calc_res}",
                 metadata={"total_gratuity": calc_res["total_gratuity"]},
@@ -523,6 +579,7 @@ def synthesis_node(state: AgentState, generator: GeneratorProtocol) -> AgentStat
     """Synthesize citation-grounded draft answer from evidence and validated tool results."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
 
     if state.is_timed_out() or not state.has_step_budget():
         state.current_status = AgentStatus.ABSTAINED
@@ -544,6 +601,18 @@ def synthesis_node(state: AgentState, generator: GeneratorProtocol) -> AgentStat
             language=Language(state.output_language),
             tool_calls=state.tool_calls,
         )
+        if state.is_timed_out() or not state.has_step_budget():
+            state.draft_answer = None
+            state.current_status = AgentStatus.ABSTAINED
+            state.abstention_reason = "exhausted_budget"
+            state.add_trace(
+                "synthesis_node",
+                "timeout_check",
+                "budget_exceeded",
+                "Timeout exceeded during generator execution.",
+                (time.perf_counter() - start_time) * 1000.0,
+            )
+            return state
         state.draft_answer = draft
     except Exception as exc:
         state.errors.append(f"Generator failure: {type(exc).__name__}")
@@ -576,6 +645,7 @@ def verification_node(state: AgentState, verifier: CitationVerifier) -> AgentSta
     """Execute strict verification gate on draft claims and citations."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
     state.verification_attempts += 1
 
     if not state.draft_answer:
@@ -662,6 +732,7 @@ def reformulate_node(
     """Analyze unverified claims, formulate targeted sub-queries, and schedule re-retrieval."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
 
     if (
         state.verification_attempts >= state.max_attempts
@@ -731,6 +802,7 @@ def abstain_node(state: AgentState, verifier: CitationVerifier) -> AgentState:
     """Produce formal, citation-bounded abstention response."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
     reason = state.abstention_reason or "policy_abstention"
 
     state.verified_answer = GroundedLegalAnswer(
@@ -765,12 +837,48 @@ def finalize_node(state: AgentState) -> LegalResponse:
     """Map final agent state into canonical LegalResponse with complete audit trace."""
     start_time = time.perf_counter()
     state.step_count += 1
+    state.execution_steps += 1
 
     ans = state.verified_answer
-    if ans is None or not ans.answerable:
+
+    # Strict multi-gate verification check
+    ver_passed = bool(
+        ans
+        and ans.answerable
+        and (ans.verification_status == VerificationStatus.VERIFIED)
+        and all(vc.verification_status == VerificationStatus.VERIFIED for vc in ans.claims)
+        and bool(ans.claims)
+    )
+
+    candidate_evidence = ans.referenced_evidence if (ans and ans.referenced_evidence) else []
+    jurisdiction_valid = (state.jurisdiction == Jurisdiction.UAE_ONSHORE) and (
+        all(ev.provision.jurisdiction == state.jurisdiction for ev in candidate_evidence)
+    )
+    temporal_valid = all(
+        (
+            state.query.as_of is None
+            or (
+                (
+                    ev.provision.effective_from is None
+                    or state.query.as_of >= ev.provision.effective_from
+                )
+                and (
+                    ev.provision.effective_until is None
+                    or state.query.as_of <= ev.provision.effective_until
+                )
+            )
+        )
+        for ev in candidate_evidence
+    )
+
+    overall_passed = ver_passed and jurisdiction_valid and temporal_valid
+
+    if not overall_passed:
         reason = (
             state.abstention_reason
             or (ans.abstention_reason if ans else None)
+            or ("unsupported_jurisdiction" if not jurisdiction_valid else None)
+            or ("temporal_out_of_scope" if not temporal_valid else None)
             or "unverified_claim"
         )
         if ans and ans.full_text and ans.full_text.startswith("**Abstention Notice**"):
@@ -794,8 +902,8 @@ def finalize_node(state: AgentState) -> LegalResponse:
             passed=False,
             citation_valid=False,
             claims_grounded=False,
-            jurisdiction_valid=(state.jurisdiction == Jurisdiction.UAE_ONSHORE),
-            temporal_valid=True,
+            jurisdiction_valid=jurisdiction_valid,
+            temporal_valid=temporal_valid,
             bilingual_consistent=None,
             schema_valid=True,
             issues=(
@@ -804,9 +912,12 @@ def finalize_node(state: AgentState) -> LegalResponse:
                 + [reason]
             ),
         )
+        confidence = 0.0
+        fallback_reason = reason
     else:
+        assert ans is not None
         answer_text = ans.full_text
-        answerable = ans.answerable
+        answerable = True
         evidence = ans.referenced_evidence
 
         # Map synthesis claims to canonical Claim objects
@@ -827,45 +938,22 @@ def finalize_node(state: AgentState) -> LegalResponse:
                     claim_key=vc.claim_key,
                     cited_alignment_ids=vc.cited_alignment_ids,
                     evidence_ids=ev_ids,
-                    supported=(vc.verification_status == VerificationStatus.VERIFIED),
+                    supported=True,
                 )
             )
 
         ver_result = VerificationResult(
-            passed=(ans.verification_status == VerificationStatus.VERIFIED),
-            citation_valid=all(
-                vc.verification_status == VerificationStatus.VERIFIED for vc in ans.claims
-            )
-            if ans.claims
-            else False,
-            claims_grounded=bool(ans.claims)
-            and all(vc.verification_status == VerificationStatus.VERIFIED for vc in ans.claims),
-            jurisdiction_valid=(state.jurisdiction == Jurisdiction.UAE_ONSHORE)
-            and all(ev.provision.jurisdiction == state.jurisdiction for ev in evidence),
-            temporal_valid=all(
-                (
-                    state.query.as_of is None
-                    or (
-                        (
-                            ev.provision.effective_from is None
-                            or state.query.as_of >= ev.provision.effective_from
-                        )
-                        and (
-                            ev.provision.effective_until is None
-                            or state.query.as_of <= ev.provision.effective_until
-                        )
-                    )
-                )
-                for ev in evidence
-            ),
+            passed=True,
+            citation_valid=True,
+            claims_grounded=True,
+            jurisdiction_valid=jurisdiction_valid,
+            temporal_valid=temporal_valid,
             bilingual_consistent=None,
             schema_valid=True,
-            issues=(
-                [reason for claim in ans.claims for reason in claim.verification_reasons]
-                + state.errors
-                + ([] if ans.answerable else [ans.abstention_reason or "verification_failure"])
-            ),
+            issues=state.errors,
         )
+        confidence = min([claim.support_score for claim in ans.claims] or [1.0])
+        fallback_reason = None
 
     duration_ms = (time.perf_counter() - start_time) * 1000.0
     state.add_trace(
@@ -887,19 +975,8 @@ def finalize_node(state: AgentState) -> LegalResponse:
         claims=claims,
         tool_calls=state.tool_calls,
         verification=ver_result,
-        confidence=(
-            min(
-                [
-                    claim.support_score
-                    for claim in (ans.claims if ans else [])
-                    if claim.verification_status == VerificationStatus.VERIFIED
-                ]
-                or [0.0]
-            )
-            if answerable
-            else 0.0
-        ),
-        fallback_reason=state.abstention_reason,
+        confidence=confidence,
+        fallback_reason=fallback_reason,
         trace=state.trace,
         created_at=datetime.utcnow(),
     )

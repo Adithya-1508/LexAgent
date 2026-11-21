@@ -185,10 +185,53 @@ def extract_legal_facts(text: str, claim_key_hint: str | None = None) -> list[Le
         polarity = "negative"
 
     # Identify primary legal subject and domain
+    has_employer = any(s in text_cf for s in ("employer", "صاحب العمل"))
+    has_worker = any(s in text_cf for s in ("worker", "employee", "العامل", "الموظف"))
+
     subject = None
-    if any(s in text_cf for s in ("employer", "صاحب العمل")):
+    if has_worker and has_employer:
+        worker_cues = (
+            "worker wishing",
+            "worker shall",
+            "worker must",
+            "employee wishing",
+            "employee shall",
+            "employee must",
+            "resigns",
+            "transfer to another",
+            "leave the state",
+            "إذا رغب العامل",
+            "على العامل",
+            "للعامل",
+            "استقال العامل",
+            "مغادرة الدولة",
+        )
+        employer_cues = (
+            "employer wishing",
+            "employer shall",
+            "employer must",
+            "employer may",
+            "terminate the service",
+            "إنهاء خدمة",
+            "صاحب العمل بإخطار",
+            "على صاحب العمل",
+            "لصاحب العمل",
+        )
+        if any(c in text_cf for c in worker_cues):
+            subject = "worker"
+        elif any(c in text_cf for c in employer_cues):
+            subject = "employer"
+        else:
+            w_indices = [
+                text_cf.find(w) for w in ("worker", "employee", "العامل", "الموظف") if w in text_cf
+            ]
+            e_indices = [text_cf.find(e) for e in ("employer", "صاحب العمل") if e in text_cf]
+            min_w = min(w_indices) if w_indices else 999999
+            min_e = min(e_indices) if e_indices else 999999
+            subject = "worker" if min_w < min_e else "employer"
+    elif has_employer:
         subject = "employer"
-    elif any(s in text_cf for s in ("worker", "employee", "العامل", "الموظف")):
+    elif has_worker:
         subject = "worker"
 
     # Determine claim key

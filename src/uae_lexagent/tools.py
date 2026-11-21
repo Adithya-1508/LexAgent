@@ -81,10 +81,30 @@ def calculate_gratuity(
     service_years: float | Decimal,
     is_uae_national: bool = False,
     work_pattern: str = "full_time",
+    unpaid_absence_days: float | Decimal = Decimal("0"),
 ) -> dict[str, Any]:
     """Calculate UAE statutory gratuity under Federal Decree-Law No. 33 of 2021 Article 51."""
-    salary = Decimal(str(basic_salary))
-    years = Decimal(str(service_years))
+    try:
+        salary = Decimal(str(basic_salary))
+        years = Decimal(str(service_years))
+        absence = Decimal(str(unpaid_absence_days))
+    except Exception as exc:
+        raise ValueError(
+            f"Invalid gratuity inputs: could not parse numeric values: {type(exc).__name__}"
+        ) from exc
+
+    if not salary.is_finite() or not years.is_finite() or not absence.is_finite():
+        raise ValueError(
+            "Invalid gratuity input: non-finite values (NaN or Infinity) are prohibited."
+        )
+
+    if salary <= Decimal("0"):
+        raise ValueError("Invalid gratuity input: basic_salary must be strictly positive.")
+
+    if years < Decimal("0") or absence < Decimal("0"):
+        raise ValueError(
+            "Invalid gratuity input: service_years and unpaid_absence_days must be non-negative."
+        )
 
     if is_uae_national:
         return {
@@ -94,10 +114,24 @@ def calculate_gratuity(
             "currency": "AED",
             "statutory_basis": "FDL_33_2021_A51_C1",
             "eligibility_status": "ineligible_pension_applicable",
-            "note": "UAE national workers are covered under the Federal Pension and Social Security Law rather than end-of-service gratuity.",
+            "note": "UAE national workers are covered under the Federal Pension and Social Security Law rather than end-of-service gratuity under Article 51(1).",
         }
 
-    if years < Decimal("1.0"):
+    if work_pattern == "part_time":
+        return {
+            "basic_salary": float(salary),
+            "service_years": float(years),
+            "total_gratuity": 0.0,
+            "currency": "AED",
+            "statutory_basis": "CABINET_RES_1_2022_A30_C1",
+            "eligibility_status": "part_time_prorated",
+            "note": "Part-time worker end-of-service gratuity is prorated according to contract working hours under Cabinet Resolution No. 1 of 2022 Article 30.",
+        }
+
+    # Article 51(2): Days of absence from work without pay shall not be included in calculating the service period
+    effective_years = max(Decimal("0.0"), years - (absence / Decimal("365.0")))
+
+    if effective_years < Decimal("1.0"):
         return {
             "basic_salary": float(salary),
             "service_years": float(years),
@@ -105,20 +139,20 @@ def calculate_gratuity(
             "currency": "AED",
             "statutory_basis": "FDL_33_2021_A51_C2",
             "eligibility_status": "ineligible_under_one_year",
-            "note": "A worker who has completed less than 1 year of continuous service is not entitled to end-of-service gratuity.",
+            "note": "A worker who has completed less than 1 year of continuous service is not entitled to end-of-service gratuity under Article 51(2).",
         }
 
     daily_wage = salary / Decimal("30")
-    first_5_years = min(years, Decimal("5.0"))
+    first_5_years = min(effective_years, Decimal("5.0"))
     gratuity_first_5 = daily_wage * Decimal("21") * first_5_years
 
-    additional_years = max(Decimal("0.0"), years - Decimal("5.0"))
+    additional_years = max(Decimal("0.0"), effective_years - Decimal("5.0"))
     gratuity_additional = daily_wage * Decimal("30") * additional_years
 
     total = (gratuity_first_5 + gratuity_additional).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
-    max_cap = salary * Decimal("24")  # 2 years total basic salary cap
+    max_cap = salary * Decimal("24")  # 2 years total basic salary cap (Article 51(3))
 
     final_amount = min(total, max_cap)
 
