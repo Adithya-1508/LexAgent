@@ -9,6 +9,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+from ..agent import LegalAgentOrchestrator
 from ..ingestion import load_provisions
 from ..models import (
     BenchmarkCase,
@@ -61,6 +62,11 @@ class BenchmarkEvaluator:
         verification_mode: str = "strict",
         provisions: list[LegalProvision] | None = None,
         metadata: dict[str, object] | None = None,
+        mode: str = "agent",
+        runtime: str = "deterministic",
+        max_attempts: int = 2,
+        max_steps: int = 20,
+        timeout_seconds: float = 10.0,
     ) -> None:
         self.retriever = retriever
         self.valid_alignment_ids = valid_alignment_ids
@@ -72,12 +78,36 @@ class BenchmarkEvaluator:
             valid_corpus_alignment_ids=self.valid_alignment_ids,
             strict=(verification_mode.casefold() == "strict"),
         )
+        self.mode = mode.casefold().strip()
+        self.runtime = runtime.casefold().strip()
+        if self.mode not in {"baseline", "synthesis", "agent"}:
+            raise ValueError("mode must be 'baseline', 'synthesis', or 'agent'")
+        if self.runtime not in {"deterministic", "langgraph"}:
+            raise ValueError("runtime must be 'deterministic' or 'langgraph'")
+        self.max_attempts = max_attempts
+        self.max_steps = max_steps
+        self.timeout_seconds = timeout_seconds
+
         self.synthesis_engine = LegalSynthesisEngine(
             retriever=self.retriever,
             generator=self.generator,
             verifier=self.verifier,
             provisions=self.provisions,
         )
+
+        if self.mode == "agent":
+            self.orchestrator: LegalAgentOrchestrator | None = LegalAgentOrchestrator(
+                retriever=self.retriever,
+                provisions=self.provisions,
+                generator=self.generator,
+                verifier=self.verifier,
+                runtime="langgraph" if self.runtime == "langgraph" else "deterministic",
+                max_attempts=self.max_attempts,
+                max_steps=self.max_steps,
+                timeout_seconds=self.timeout_seconds,
+            )
+        else:
+            self.orchestrator = None
 
     def predict_case(self, case: BenchmarkCase) -> EvaluationPrediction:
         """Run routing, retrieval, grounded synthesis, and tools on a benchmark query."""
@@ -96,17 +126,68 @@ class BenchmarkEvaluator:
             as_of=case.as_of,
         )
 
-        # 3. Grounded Synthesis & Citation Verification Gate
+        # 3. Agent Mode Execution
+        if self.mode == "agent" and self.orchestrator is not None:
+            resp = self.orchestrator.run(legal_query)
+
+            retrieved_alignment_ids: list[str] = []
+            for ev in resp.evidence:
+                align_id = ev.provision.alignment_id or ev.provision.provision_id
+                if align_id not in retrieved_alignment_ids:
+                    retrieved_alignment_ids.append(align_id)
+
+            cited_alignment_ids: list[str] = []
+            predicted_claims: list[PredictedClaim] = []
+            for c in resp.claims:
+                if c.supported:
+                    for cid in c.cited_alignment_ids:
+                        if cid not in cited_alignment_ids:
+                            cited_alignment_ids.append(cid)
+                predicted_claims.append(
+                    PredictedClaim(
+                        claim_id=c.claim_id,
+                        claim_key=c.claim_key,
+                        conclusion=c.text,
+                        cited_alignment_ids=c.cited_alignment_ids,
+                        supported=c.supported,
+                    )
+                )
+
+            tool_name = None
+            tool_arguments: dict[str, object] = {}
+            calc_amount = None
+            if resp.tool_calls:
+                tc = resp.tool_calls[0]
+                tool_name = tc.tool_name
+                tool_arguments = tc.arguments
+                if tc.result and "total_gratuity" in tc.result:
+                    calc_amount = Decimal(str(tc.result["total_gratuity"]))
+
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+            return EvaluationPrediction(
+                case_id=case.case_id,
+                answerable=resp.answerable,
+                jurisdiction=resp.jurisdiction,
+                retrieved_alignment_ids=retrieved_alignment_ids,
+                cited_alignment_ids=cited_alignment_ids,
+                claims=predicted_claims,
+                tool_name=tool_name,
+                tool_arguments=tool_arguments,
+                calculated_amount=calc_amount,
+                latency_ms=latency_ms,
+            )
+
+        # 4. Fallback Grounded Synthesis & Citation Verification Gate
         grounded_answer = self.synthesis_engine.synthesize(legal_query)
 
-        # 4. Extract retrieved alignment IDs
+        # Extract retrieved alignment IDs
         retrieved_alignment_ids: list[str] = []
         for ev in grounded_answer.referenced_evidence:
             align_id = ev.provision.alignment_id or ev.provision.provision_id
             if align_id not in retrieved_alignment_ids:
                 retrieved_alignment_ids.append(align_id)
 
-        # 5. Extract verified cited alignment IDs
+        # Extract verified cited alignment IDs
         cited_alignment_ids: list[str] = []
         for c in grounded_answer.claims:
             if c.verification_status == VerificationStatus.VERIFIED:
@@ -114,7 +195,7 @@ class BenchmarkEvaluator:
                     if cid not in cited_alignment_ids:
                         cited_alignment_ids.append(cid)
 
-        # 6. Extract structured claims
+        # Extract structured claims
         predicted_claims: list[PredictedClaim] = [
             PredictedClaim(
                 claim_id=c.claim_id,
@@ -126,7 +207,7 @@ class BenchmarkEvaluator:
             for c in grounded_answer.claims
         ]
 
-        # 7. Tool evaluation based on query intent
+        # Tool evaluation based on query intent
         tool_name = None
         tool_arguments = {}
         calc_amount = None
@@ -196,6 +277,7 @@ class BaselineEvaluator(BenchmarkEvaluator):
             valid_alignment_ids={p.alignment_id for p in provisions if p.alignment_id},
             retriever_name="baseline",
             provisions=provisions,
+            mode="baseline",
             metadata={
                 "retriever": "baseline",
                 "corpus_fingerprint": compute_corpus_fingerprint(provisions),
@@ -213,6 +295,11 @@ def run_evaluation(
     reranker_type: str = "identity",
     generator_type: str = "deterministic",
     verification_mode: str = "strict",
+    mode: str = "agent",
+    runtime: str = "deterministic",
+    max_attempts: int = 2,
+    max_steps: int = 20,
+    timeout_seconds: float = 10.0,
 ) -> ShubhiSignalScore:
     """Run benchmark evaluation with selected retriever, generator, and verification configuration."""
     project_root = Path(__file__).resolve().parents[3]
@@ -261,6 +348,11 @@ def run_evaluation(
             generator=generator,
             verification_mode=verification_mode,
             provisions=all_provisions,
+            mode=mode,
+            runtime=runtime,
+            max_attempts=max_attempts,
+            max_steps=max_steps,
+            timeout_seconds=timeout_seconds,
             metadata={
                 "retriever": "hybrid",
                 "embedding_provider": type(embedder).__name__,
@@ -268,6 +360,8 @@ def run_evaluation(
                 "reranker": type(reranker).__name__,
                 "generator": type(generator).__name__,
                 "verification_mode": verification_mode,
+                "mode": mode,
+                "runtime": runtime,
                 "corpus_fingerprint": index.corpus_fingerprint,
                 "corpus_version": index.corpus_version,
             },
@@ -281,10 +375,17 @@ def run_evaluation(
             generator=generator,
             verification_mode=verification_mode,
             provisions=all_provisions,
+            mode=mode,
+            runtime=runtime,
+            max_attempts=max_attempts,
+            max_steps=max_steps,
+            timeout_seconds=timeout_seconds,
             metadata={
                 "retriever": "baseline",
                 "generator": type(generator).__name__,
                 "verification_mode": verification_mode,
+                "mode": mode,
+                "runtime": runtime,
                 "corpus_fingerprint": compute_corpus_fingerprint(all_provisions),
                 "corpus_version": corpus_version,
             },
@@ -309,7 +410,7 @@ def run_evaluation(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="UAE-LexAgent Benchmark Evaluator (Retrieval + Grounded Synthesis)")
+    parser = argparse.ArgumentParser(description="UAE-LexAgent Benchmark Evaluator (Retrieval + Grounded Synthesis + Agent)")
     parser.add_argument("--benchmark", type=Path, default=Path("data/evaluation/benchmark_queries.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("reports/benchmark_results.json"))
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark_report.md"))
@@ -318,11 +419,16 @@ def main() -> None:
     parser.add_argument("--reranker", choices=["identity", "cross-encoder"], default="identity")
     parser.add_argument("--generator", choices=["deterministic", "openai", "anthropic", "ollama", "vllm"], default="deterministic")
     parser.add_argument("--verification", choices=["strict", "permissive"], default="strict")
+    parser.add_argument("--mode", choices=["baseline", "synthesis", "agent"], default="agent")
+    parser.add_argument("--runtime", choices=["deterministic", "langgraph"], default="deterministic")
+    parser.add_argument("--max-attempts", type=int, default=2)
+    parser.add_argument("--max-steps", type=int, default=20)
+    parser.add_argument("--timeout-seconds", type=float, default=10.0)
     args = parser.parse_args()
 
     print(
-        f"Running Benchmark: retriever={args.retriever}, embedding={args.embedding}, "
-        f"generator={args.generator}, verification={args.verification}"
+        f"Running Benchmark: retriever={args.retriever}, mode={args.mode}, runtime={args.runtime}, "
+        f"embedding={args.embedding}, generator={args.generator}, verification={args.verification}"
     )
     score = run_evaluation(
         benchmark_path=args.benchmark,
@@ -333,6 +439,11 @@ def main() -> None:
         reranker_type=args.reranker,
         generator_type=args.generator,
         verification_mode=args.verification,
+        mode=args.mode,
+        runtime=args.runtime,
+        max_attempts=args.max_attempts,
+        max_steps=args.max_steps,
+        timeout_seconds=args.timeout_seconds,
     )
     print("Evaluation Complete!")
     if score.aggregate_score is not None:

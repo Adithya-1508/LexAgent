@@ -10,7 +10,7 @@ from hashlib import sha256
 from decimal import Decimal
 from typing import Any, Protocol, Sequence
 
-from ..models import Jurisdiction, Language, LegalEvidence, LegalQuery
+from ..models import Jurisdiction, Language, LegalEvidence, LegalQuery, ToolCall
 from .contracts import (
     DraftLegalClaim,
     GeneratedLegalAnswer,
@@ -39,6 +39,7 @@ class DeterministicTemplateGenerator:
         evidence: list[LegalEvidence],
         jurisdiction: Jurisdiction = Jurisdiction.UAE_ONSHORE,
         language: Language = Language.EN,
+        tool_calls: list[ToolCall] | None = None,
     ) -> GeneratedLegalAnswer:
         start_time = time.perf_counter()
         answer_id = _stable_id("ans", query.query_id, query.text, language.value)
@@ -56,6 +57,7 @@ class DeterministicTemplateGenerator:
                 claims=[],
                 full_text=f"**Abstention Notice**: {decision.explanation}",
                 referenced_evidence=[],
+                tool_calls=tool_calls or [],
                 abstention_reason=decision.reason,
                 generation_latency_ms=latency_ms,
             )
@@ -109,6 +111,7 @@ class DeterministicTemplateGenerator:
             any(w in query_cf for w in ("probation", "تجربة"))
             and any(w in query_cf for w in ("employer", "صاحب العمل"))
             and any(w in query_cf for w in ("terminate", "notice", "إنهاء", "اخطار", "إخطار", "فصل"))
+            and not any(w in query_cf for w in ("another employer", "new employer", "move to", "join another"))
         ):
             align_id = "FDL_33_2021_A9_C1"
             if has_evidence(align_id):
@@ -224,8 +227,28 @@ class DeterministicTemplateGenerator:
                 )
                 )
 
-        # Do not turn the top lexical hit into an answer.  Unsupported query
-        # intents must remain unverified instead of being promoted by retrieval.
+        # Bind validated tool calculations into claims when present
+        if tool_calls:
+            for tc in tool_calls:
+                if tc.tool_name == "calculate_gratuity" and tc.valid_schema and tc.result:
+                    align_ids = ["FDL_33_2021_A51_C2"]
+                    tot = float(tc.result.get("total_gratuity", 0.0))
+                    sal = float(tc.result.get("basic_salary", 0.0))
+                    yrs = float(tc.result.get("service_years", 0.0))
+                    claims.append(
+                        DraftLegalClaim(
+                            claim_id=claim_id(f"gratuity_calc_{tot}"),
+                            claim_key="gratuity_calculation",
+                            conclusion=(
+                                f"وفقاً للمادة 51، تبلغ مكافأة نهاية الخدمة المستحقة {tot:.2f} درهم لراتب أساسي {sal:.2f} ومدة خدمة {yrs:.1f} سنة."
+                                if is_arabic
+                                else f"Under Article 51, the statutory end-of-service gratuity is AED {tot:.2f} for basic salary AED {sal:.2f} and {yrs:.1f} years of service."
+                            ),
+                            cited_alignment_ids=align_ids,
+                            confidence=Decimal("1.0"),
+                            tool_derived=True,
+                        )
+                    )
 
         # Construct summary and full text with inline bracketed citations
         summary_lines = []
@@ -246,6 +269,7 @@ class DeterministicTemplateGenerator:
             claims=claims,
             full_text=full_text,
             referenced_evidence=evidence,
+            tool_calls=tool_calls or [],
             abstention_reason=None,
             generation_latency_ms=latency_ms,
         )
@@ -264,6 +288,7 @@ class LLMGenerator:
         evidence: list[LegalEvidence],
         jurisdiction: Jurisdiction = Jurisdiction.UAE_ONSHORE,
         language: Language = Language.EN,
+        tool_calls: list[ToolCall] | None = None,
     ) -> GeneratedLegalAnswer:
         start_time = time.perf_counter()
         answer_id = _stable_id("ans", query.query_id, query.text, language.value, self.model_name)
@@ -281,6 +306,7 @@ class LLMGenerator:
                 claims=[],
                 full_text=f"**Abstention Notice**: {decision.explanation}",
                 referenced_evidence=[],
+                tool_calls=tool_calls or [],
                 abstention_reason=decision.reason,
                 generation_latency_ms=latency_ms,
             )
@@ -301,6 +327,9 @@ Jurisdiction: {jurisdiction.value}
 
 Provided Legal Evidence:
 {context_str}
+
+Validated Tool Results (do not alter these values):
+{json.dumps(tool_calls or [], default=lambda value: value.model_dump() if hasattr(value, "model_dump") else str(value), ensure_ascii=False)}
 
 Respond in valid JSON format matching this schema:
 {{
@@ -337,6 +366,10 @@ Respond in valid JSON format matching this schema:
                     conclusion=c["conclusion"],
                     cited_alignment_ids=c.get("cited_alignment_ids", []),
                     confidence=Decimal("0.9"),
+                    tool_derived=(
+                        c.get("claim_key") == "gratuity_calculation"
+                        and any(call.tool_name == "calculate_gratuity" and call.valid_schema and call.result for call in (tool_calls or []))
+                    ),
                 )
                 for i, c in enumerate(parsed.get("claims", []), start=1)
                 if isinstance(c, dict) and isinstance(c.get("claim_key"), str)
@@ -359,6 +392,7 @@ Respond in valid JSON format matching this schema:
                 claims=claims,
                 full_text=full_text,
                 referenced_evidence=evidence,
+                tool_calls=tool_calls or [],
                 abstention_reason=None,
                 generation_latency_ms=latency_ms,
             )
@@ -374,6 +408,7 @@ Respond in valid JSON format matching this schema:
                 claims=[],
                 full_text="**Abstention Notice**: Generation error occurred.",
                 referenced_evidence=[],
+                tool_calls=tool_calls or [],
                 abstention_reason="unverified_claim",
                 generation_latency_ms=latency_ms,
             )

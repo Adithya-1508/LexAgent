@@ -1,0 +1,123 @@
+"""State definitions and trace contracts for the agentic reasoning engine."""
+
+from __future__ import annotations
+
+import time
+from enum import Enum
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from ..models import (
+    AgentTraceStep,
+    Jurisdiction,
+    Language,
+    LegalEvidence,
+    LegalQuery,
+    ToolCall,
+)
+from ..synthesis.contracts import GeneratedLegalAnswer, GroundedLegalAnswer
+
+
+class AgentIntent(str, Enum):
+    """Categorized intent of the incoming legal query."""
+
+    DIRECT_FACTUAL = "direct_factual"
+    MULTI_HOP = "multi_hop"
+    CALCULATION = "calculation"
+    ABSTENTION = "abstention"
+    CLARIFICATION = "clarification"
+
+
+class AgentStatus(str, Enum):
+    """Execution status of the agentic workflow."""
+
+    RUNNING = "running"
+    RETRIEVING = "retrieving"
+    SYNTHESIZING = "synthesizing"
+    VERIFYING = "verifying"
+    RETRYING = "retrying"
+    VERIFIED = "verified"
+    ABSTAINED = "abstained"
+    FAILED = "failed"
+
+
+class AgentState(BaseModel):
+    """Unified state schema driving both deterministic and LangGraph runtimes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Queries and Routing
+    query: LegalQuery
+    routed_query: LegalQuery | None = None
+    language: Language = Language.UNKNOWN
+    output_language: Literal["en", "ar"] = "en"
+    jurisdiction: Jurisdiction = Jurisdiction.UNKNOWN
+    intent: AgentIntent = AgentIntent.DIRECT_FACTUAL
+
+    # Multi-hop & Decomposition
+    sub_queries: list[str] = Field(default_factory=list)
+    completed_sub_queries: list[str] = Field(default_factory=list)
+
+    # Retrieval & Evidence
+    retrieved_evidence: list[LegalEvidence] = Field(default_factory=list)
+    deduplicated_alignment_ids: set[str] = Field(default_factory=set)
+
+    # Statutory Tool Execution
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    tool_results: dict[str, Any] = Field(default_factory=dict)
+
+    # Synthesis & Verification
+    draft_answer: GeneratedLegalAnswer | None = None
+    verified_answer: GroundedLegalAnswer | None = None
+
+    # Retry, Budgets & Limits
+    verification_attempts: int = 0
+    max_attempts: int = Field(default=2, ge=1, le=10)
+    max_steps: int = Field(default=20, ge=1, le=100)
+    max_sub_queries: int = Field(default=4, ge=1, le=20)
+    max_evidence_items: int = Field(default=10, ge=1, le=100)
+    timeout_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
+    start_time: float = Field(default_factory=time.perf_counter)
+    visited_reformulation_keys: set[str] = Field(default_factory=set)
+
+    # Terminal Status & Provable Audit Trail
+    current_status: AgentStatus = AgentStatus.RUNNING
+    abstention_reason: str | None = None
+    trace: list[AgentTraceStep] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+    def add_trace(
+        self,
+        node_name: str,
+        action: str,
+        status: str,
+        rationale: str,
+        duration_ms: float,
+        input_summary: str = "",
+        output_summary: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Append an immutable, privacy-safe audit record to trace."""
+        if len(self.trace) >= self.max_steps:
+            return
+        step = AgentTraceStep(
+            step_index=len(self.trace),
+            node_name=node_name,
+            action=action,
+            status=status,
+            rationale=rationale,
+            duration_ms=round(duration_ms, 3),
+            input_summary=input_summary[:200],
+            output_summary=output_summary[:200],
+            metadata=metadata or {},
+        )
+        self.trace.append(step)
+
+    def is_timed_out(self) -> bool:
+        """Check if execution has exceeded wall-clock timeout budget."""
+        return (time.perf_counter() - self.start_time) >= self.timeout_seconds
+
+    def has_step_budget(self) -> bool:
+        """Check if agent has remaining step budget."""
+        return len(self.trace) < self.max_steps

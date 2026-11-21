@@ -148,7 +148,7 @@ def extract_legal_facts(text: str, claim_key_hint: str | None = None) -> list[Le
     text_cf = text.casefold()
 
     # Article / Clause references
-    art_match = re.search(r"(?:article|المادة)\s*\(?(\d+)\)?", text_cf)
+    art_match = re.search(r"(?:article|المادة|للمادة)\s*\(?(\d+)\)?", text_cf)
     clause_match = re.search(r"(?:clause|paragraph|البند|الفقرة)\s*\(?(\d+)\)?", text_cf)
     article_str = art_match.group(1) if art_match else None
     clause_str = clause_match.group(1) if clause_match else None

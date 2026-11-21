@@ -55,7 +55,7 @@ def evaluate_answerability(
         )
 
     # 2. Check for Non-Existent Articles
-    art_matches = re.findall(r"(?:article|المادة)\s*\(?(\d+)\)?", query_text_cf)
+    art_matches = re.findall(r"(?:article|المادة|للمادة)\s*\(?(\d+)\)?", query_text_cf)
     for art_str in art_matches:
         art_num = int(art_str)
         known_articles = {int(p.article) for p in provisions or () if p.article and p.jurisdiction == Jurisdiction.UAE_ONSHORE}

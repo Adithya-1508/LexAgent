@@ -22,6 +22,8 @@ from .models import (
     LegalSource,
 )
 
+from .agent import LegalAgentOrchestrator
+
 __all__ = [
     "Jurisdiction",
     "Language",
@@ -32,6 +34,7 @@ __all__ = [
     "LegalProvision",
     "LegalQuery",
     "LegalSource",
+    "LegalAgentOrchestrator",
     "PredictedClaim",
     "is_valid_official_url",
     "load_document_metadata",

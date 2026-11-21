@@ -63,6 +63,7 @@ class CitationVerifier:
                 claims=[],
                 full_text="**Abstention Notice**: The answer could not be verified against the supported legal corpus.",
                 referenced_evidence=[],
+                tool_calls=draft.tool_calls,
                 abstention_reason=draft.abstention_reason or "policy_abstention",
                 generation_latency_ms=draft.generation_latency_ms,
                 verification_latency_ms=latency_ms,
@@ -120,7 +121,7 @@ class CitationVerifier:
                     reasons.append("Claim meaning is not supported by the cited statutory provision.")
                     support_score = 0.0
 
-                claim_facts = extract_legal_facts(claim.conclusion)
+                claim_facts = [] if claim.tool_derived else extract_legal_facts(claim.conclusion)
                 cited_facts = [
                     extract_legal_facts(evidence_by_align[cid].provision.text)[0]
                     for cid in claim.cited_alignment_ids
@@ -158,6 +159,7 @@ class CitationVerifier:
                     conclusion=claim.conclusion,
                     cited_alignment_ids=claim.cited_alignment_ids,
                     confidence=claim.confidence if status == VerificationStatus.VERIFIED else Decimal("0.0"),
+                    tool_derived=claim.tool_derived,
                     verification_status=status,
                     verification_reasons=reasons,
                     support_score=support_score,
@@ -209,6 +211,7 @@ class CitationVerifier:
                 ev for ev in evidence
                 if (ev.provision.alignment_id or ev.provision.provision_id) in structured_citations
             ],
+            tool_calls=draft.tool_calls,
             abstention_reason=abstention_reason,
             generation_latency_ms=draft.generation_latency_ms,
             verification_latency_ms=latency_ms,

@@ -178,15 +178,35 @@ class LegalEvidence(BaseModel):
 class Claim(BaseModel):
     claim_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
+    claim_key: str = ""
+    cited_alignment_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     supported: bool | None = None
 
 
 class ToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any] | None = None
     valid_schema: bool = False
+    statutory_basis: str | None = None
+    execution_latency_ms: float = Field(default=0.0, ge=0.0)
+
+
+class AgentTraceStep(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    step_index: int = Field(ge=0)
+    node_name: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+    rationale: str
+    duration_ms: float = Field(ge=0.0)
+    input_summary: str = ""
+    output_summary: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class VerificationResult(BaseModel):
@@ -212,6 +232,7 @@ class LegalResponse(BaseModel):
     verification: VerificationResult
     confidence: float = Field(ge=0.0, le=1.0)
     fallback_reason: str | None = None
+    trace: list[AgentTraceStep] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

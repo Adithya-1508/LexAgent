@@ -8,7 +8,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..models import Jurisdiction, Language, LegalEvidence, LegalQuery
+from ..models import Jurisdiction, Language, LegalEvidence, LegalQuery, ToolCall
 
 
 class VerificationStatus(str, Enum):
@@ -30,6 +30,7 @@ class DraftLegalClaim(BaseModel):
     conclusion: str = Field(min_length=1)
     cited_alignment_ids: list[str] = Field(default_factory=list)
     confidence: Decimal = Field(default=Decimal("1.0"), ge=0, le=1)
+    tool_derived: bool = False
 
 
 class VerifiedLegalClaim(DraftLegalClaim):
@@ -53,6 +54,7 @@ class GeneratedLegalAnswer(BaseModel):
     claims: list[DraftLegalClaim] = Field(default_factory=list)
     full_text: str = ""
     referenced_evidence: list[LegalEvidence] = Field(default_factory=list)
+    tool_calls: list[ToolCall] = Field(default_factory=list)
     abstention_reason: str | None = None
     generation_latency_ms: float = 0.0
 
@@ -71,6 +73,7 @@ class GroundedLegalAnswer(BaseModel):
     claims: list[VerifiedLegalClaim] = Field(default_factory=list)
     full_text: str = ""
     referenced_evidence: list[LegalEvidence] = Field(default_factory=list)
+    tool_calls: list[ToolCall] = Field(default_factory=list)
     abstention_reason: str | None = None
     generation_latency_ms: float = 0.0
     verification_latency_ms: float = 0.0
@@ -83,6 +86,7 @@ class GeneratorProtocol(Protocol):
         self,
         query: LegalQuery,
         evidence: list[LegalEvidence],
-        jurisdiction: Jurisdiction,
-        language: Language,
+        jurisdiction: Jurisdiction = Jurisdiction.UAE_ONSHORE,
+        language: Language = Language.EN,
+        tool_calls: list[ToolCall] | None = None,
     ) -> GeneratedLegalAnswer: ...
