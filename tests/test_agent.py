@@ -1096,3 +1096,45 @@ def test_tool_node_succeeds_on_part_time_with_explicit_contractual_hours() -> No
     assert len(state.tool_calls) == 1
     assert state.tool_calls[0].result["total_gratuity"] == 7000.0
     assert state.tool_calls[0].result["eligibility_status"] == "part_time_prorated"
+
+
+def test_agent_abstains_on_bare_salary_and_service_years_query(
+    retriever: InMemoryRetriever,
+    canonical_provisions: list[LegalProvision],
+) -> None:
+    """Agent orchestrator must fail-closed when a query contains only salary and service years.
+
+    Silent assumptions regarding worker nationality and work pattern are strictly prohibited
+    at the autonomous agent layer. Direct calculator API defaults (is_uae_national=False,
+    work_pattern='full_time') are preserved for developer utility, but the agent strictly abstains.
+    """
+    from uae_lexagent.tools import calculate_gratuity
+
+    orchestrator = LegalAgentOrchestrator(retriever=retriever, provisions=canonical_provisions)
+
+    # 1. Agent-level execution with UAE Labour Law context
+    resp = orchestrator.run(
+        "Under UAE Labour Law, calculate gratuity for basic salary AED 10000 and 2.0 years of service."
+    )
+    assert resp.answerable is False
+    assert resp.fallback_reason == "missing_eligibility_facts"
+    assert "**Abstention Notice**" in resp.answer
+    assert len(resp.tool_calls) == 0
+    assert resp.confidence == 0.0
+
+    # 2. Agent-level execution with explicit UAE_ONSHORE jurisdiction
+    q_explicit = LegalQuery(
+        query_id="Q_BARE_SALARY_YEARS",
+        text="Calculate gratuity for basic salary AED 10000 and 2.0 years of service.",
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+    )
+    resp_explicit = orchestrator.run(q_explicit)
+    assert resp_explicit.answerable is False
+    assert resp_explicit.fallback_reason == "missing_eligibility_facts"
+    assert "**Abstention Notice**" in resp_explicit.answer
+    assert len(resp_explicit.tool_calls) == 0
+
+    # 3. Direct calculator API distinction: programmatic execution succeeds with declared defaults
+    direct_calc = calculate_gratuity(basic_salary=10000, service_years=2.0)
+    assert direct_calc["total_gratuity"] == 14000.0
+    assert direct_calc["eligibility_status"] == "eligible"

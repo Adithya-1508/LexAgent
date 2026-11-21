@@ -101,8 +101,41 @@ def calculate_gratuity(
     full_time_working_hours: float | Decimal | None = None,
 ) -> dict[str, Any]:
     """Calculate UAE statutory gratuity under Federal Decree-Law No. 33 of 2021 Article 51
-
     and Cabinet Resolution No. 1 of 2022 Article 30.
+
+    Statutory Authority & Formulas:
+    -------------------------------
+    1. Full-Time Foreign Workers (FDL 33/2021 Article 51(2)-(3)):
+       - Minimum continuous service requirement: 1 year (Clause 2).
+       - First 5 years: 21 days basic wage per year (daily wage = basic_salary / 30).
+       - Exceeding 5 years: 30 days basic wage per year.
+       - Maximum aggregate ceiling: 2 years' basic wage (24 months) (Clause 3).
+       - Unpaid absence deduction: Unpaid leave days deducted from continuous service (Clause 2).
+       - UAE Nationals: Excluded from gratuity under Article 51(1) and covered by Federal
+         Pension and Social Security Law (GPSSA).
+
+    2. Part-Time Work Pattern Proration (Cabinet Resolution No. 1 of 2022 Article 30 Clause 1):
+       - Statutory Formula (Clause 1(a)-(b)):
+           Proration % = (Contractual working hours per year / Full-time working hours per year) * 100
+           Prorated Gratuity = Full-time Equivalent Gratuity * (Contractual Hours / Full-Time Hours)
+       - Temporal Units: Contractual hours and full-time equivalent hours must be expressed in
+         identical time units (e.g. weekly hours or annual hours), ensuring a dimensionless
+         ratio in (0, 1]. Contractual hours cannot exceed full-time equivalent hours.
+       - Calculation Period: Proration applies to the baseline full-time gratuity accrued over the
+         worker's continuous service period (minimum 1 year per Article 30 Clause 2).
+       - Missing Hours: If contractual or full-time hours are unspecified, the function returns
+         total_gratuity=None with eligibility_status='non_calculable_missing_hours' to avoid
+         misleading zero or fabricated amounts.
+
+    Architectural Design Decision: Direct Calculator API vs Autonomous Agent Gating:
+    -------------------------------------------------------------------------------
+    - Direct Calculator API (this function): Retains standard programmatic defaults
+      (`is_uae_national=False, work_pattern='full_time'`) for deterministic developer scripting
+      and utility functions where inputs are pre-validated by external callers.
+    - Autonomous Legal Agent (`tool_node`): Strictly prohibits silent factual assumptions. If
+      a user query omits worker nationality or work pattern, the agent refuses to apply default
+      arguments and strictly abstains with `fallback_reason='missing_eligibility_facts'`. Silent
+      factual assumptions in legal reasoning systems are dangerous and policy-forbidden.
     """
     try:
         salary = Decimal(str(basic_salary))

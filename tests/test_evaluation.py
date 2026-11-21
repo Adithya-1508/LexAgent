@@ -395,3 +395,77 @@ def test_relative_evaluation_paths_work_outside_project_root(
     assert score.aggregate_score is not None
     assert (tmp_path / "results.json").exists()
     assert (tmp_path / "report.md").exists()
+
+
+def test_validate_official_sources_provenance_success() -> None:
+    """Official-source provenance must verify checksums and report upstream PDF status without concealment."""
+    from uae_lexagent.evaluation.validate import (
+        validate_official_sources_provenance,
+    )
+
+    official_dir = DATA_DIR / "official_sources"
+    provisions = load_provisions(official_dir / "fdl_33_2021_provisions.json")
+    provisions += load_provisions(official_dir / "cabinet_resolution_1_2022_provisions.json")
+
+    passed, errors, report = validate_official_sources_provenance(
+        official_dir=official_dir,
+        repo_root=DATA_DIR.parent,
+        provisions=provisions,
+    )
+
+    assert passed is True
+    assert errors == []
+    assert report["provenance_passed"] is True
+    assert report["verified_sources_count"] == 4
+    assert report["total_sources_in_manifest"] == 4
+    assert len(report["verified_source_ids"]) == 4
+    assert "Arabic is sole authoritative source" in report["authoritative_language_rule"]
+
+    # Explicitly reports unresolved upstream PDF snapshots rather than silently marking as resolved
+    assert report["upstream_chain_status"] == "unresolved_pending_pdf_retrieval"
+    assert len(report["unresolved_upstream_sources"]) == 4
+    assert "MOHRE_FDL_33_2021_AR_PDF" in report["unresolved_upstream_sources"]
+
+
+def test_validate_official_sources_provenance_detects_broken_hash(tmp_path: Path) -> None:
+    """Tampered source file or checksum mismatch must fail provenance check with explicit error."""
+    import shutil
+
+    from uae_lexagent.evaluation.validate import validate_official_sources_provenance
+
+    # Copy official sources to tmp_path
+    tmp_official = tmp_path / "official_sources"
+    shutil.copytree(DATA_DIR / "official_sources", tmp_official)
+
+    # Tamper with a raw text file
+    tampered_file = tmp_official / "raw" / "fdl_33_2021_current_en.txt"
+    tampered_file.write_text("TAMPERED CONTENT", encoding="utf-8")
+
+    provisions = load_provisions(tmp_official / "fdl_33_2021_provisions.json")
+
+    passed, errors, report = validate_official_sources_provenance(
+        official_dir=tmp_official,
+        repo_root=tmp_path,
+        provisions=provisions,
+    )
+
+    assert passed is False
+    assert any("SHA-256 mismatch" in err for err in errors)
+    assert report["provenance_passed"] is False
+
+
+def test_run_corpus_validation_comprehensive() -> None:
+    """run_corpus_validation CLI engine must verify provenance, benchmark integrity, and completeness."""
+    from uae_lexagent.evaluation.validate import run_corpus_validation
+
+    passed, report = run_corpus_validation(data_dir=DATA_DIR)
+    assert passed is True
+    assert report["structural_passed"] is True
+    assert report["provenance"]["provenance_passed"] is True
+
+    completeness = report["completeness"]
+    assert completeness["fdl_33_2021"]["ingested_articles_count"] == 13
+    assert completeness["fdl_33_2021"]["total_statutory_articles"] == 74
+    assert completeness["fdl_33_2021"]["status"] == "partial_mvp"
+    assert completeness["cabinet_resolution_1_2022"]["ingested_articles_count"] == 1
+    assert completeness["total_benchmark_cases"] == 200
