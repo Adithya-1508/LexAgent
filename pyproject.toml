@@ -14,6 +14,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0,<9",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
 ]
 retrieval = [
     "numpy>=1.26.0",
@@ -38,4 +40,36 @@ pythonpath = ["src"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+]
+ignore = [
+    "E501",
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "anthropic.*",
+    "ollama.*",
+    "qdrant_client.*",
+    "sentence_transformers.*",
+    "openai.*",
+    "langgraph.*",
+    "langchain_core.*",
+]
+ignore_missing_imports = true
+
 
