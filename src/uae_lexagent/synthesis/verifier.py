@@ -1,4 +1,31 @@
-"""Citation verification gate and statutory fact-checking engine."""
+"""Citation verification gate and statutory fact-checking engine.
+
+Verification Boundaries and Formal Entailment Limitations:
+-----------------------------------------------------------
+The CitationVerifier enforces a deterministic verification gate designed for high-stakes
+legal AI reasoning. It verifies:
+1. Provenance: Every cited alignment ID exists in the authoritative legal corpus.
+2. Groundedness: Every cited provision was retrieved and present in current state evidence.
+3. Jurisdiction: Provisions match the query jurisdiction (UAE onshore vs free zones).
+4. Temporal validity: Provisions were in force on the query's effective date (`as_of`).
+5. Subject-predicate consistency: Statutory duty assignments (e.g. employer vs worker obligations)
+   are not inverted.
+6. Quantities and units: All numeric limits and duration units (e.g. 14 days, 6 months) match
+   evidence exactly.
+7. Polarity: Statutory prohibitions ("shall not exceed") are strictly preserved.
+8. Computational grounding: Tool-derived numbers are verified against deterministic statutory engines.
+
+Limitations & Non-Guarantees:
+- Heuristic and structural checks do NOT constitute a formal mathematical or first-order logic
+  entailment proof for arbitrary open-domain prose.
+- Open-ended LLM generations that exhibit subtle semantic drift, novel phrasing, or unmodeled
+  legal nuances outside the structured claim ontology cannot be guaranteed to entail by
+  surface-level checks alone; therefore, the engine mandates structured claims with explicit
+  `claim_key` mappings and canonical alignment citations, failing closed whenever verification
+  criteria are not strictly met.
+- The verifier is an automated technical safeguard and does not replace human legal review
+  by licensed UAE advocates.
+"""
 
 from __future__ import annotations
 
@@ -7,26 +34,39 @@ import time
 from decimal import Decimal
 from typing import Sequence
 
-from ..models import LegalEvidence, LegalQuery
+from ..models import Jurisdiction, LegalEvidence, LegalQuery
 from .contracts import (
-    DraftLegalClaim,
     GeneratedLegalAnswer,
     GroundedLegalAnswer,
     VerificationStatus,
     VerifiedLegalClaim,
 )
-from .facts import extract_legal_facts
+from .facts import LegalQuantity, extract_legal_facts
 
 _CITATION_PATTERN = re.compile(r"\[([A-Za-z0-9_]+)\]")
 
 _ALIGNMENT_CLAIM_KEYS: dict[str, set[str]] = {
+    "FDL_33_2021_A8_C1": {"fixed_term_contract"},
     "FDL_33_2021_A9_C1": {"probation_max_months", "probation_employer_notice_days"},
     "FDL_33_2021_A9_C2": {"probation_continuation_service_credit"},
-    "FDL_33_2021_A9_C3": {"probation_employee_transfer_notice_months", "probation_recruitment_compensation"},
+    "FDL_33_2021_A9_C3": {
+        "probation_employee_transfer_notice_months",
+        "probation_recruitment_compensation",
+    },
     "FDL_33_2021_A9_C4": {"probation_employee_departure_notice_days"},
-    "FDL_33_2021_A10_C1": {"non_compete_max_years"},
-    "FDL_33_2021_A51_C2": {"gratuity_calculation"},
+    "FDL_33_2021_A9_C6": {"probation_work_permit_ban_years"},
+    "FDL_33_2021_A10_C1": {"non_compete_max_years", "non_compete_limits"},
+    "FDL_33_2021_A43_C2": {"notice_period_range_days", "notice_period_days"},
+    "FDL_33_2021_A51_C1": {"pension_exclusion", "gratuity_calculation"},
+    "FDL_33_2021_A51_C2": {
+        "gratuity_calculation",
+        "gratuity_first_five_years",
+        "gratuity_beyond_five_years",
+    },
     "FDL_33_2021_A51_C6": {"gratuity_calculation", "gratuity_cap_years"},
+    "FDL_33_2021_A53_C1": {"final_dues_payment_days"},
+    "FDL_33_2021_A66_C2": {"arabic_language_prevails", "arabic_precedence"},
+    "CABINET_RES_1_2022_A30_C1": {"part_time_gratuity", "gratuity_calculation"},
 }
 
 
@@ -81,14 +121,11 @@ class CitationVerifier:
 
         # Structured claims are the only permitted source of rendered citations.
         rendered_citations = set(_CITATION_PATTERN.findall(draft.full_text))
-        structured_citations = {
-            cid for claim in draft.claims for cid in claim.cited_alignment_ids
-        }
+        structured_citations = {cid for claim in draft.claims for cid in claim.cited_alignment_ids}
         citation_format_error = bool(rendered_citations - structured_citations)
 
         verified_claims: list[VerifiedLegalClaim] = []
         has_contradiction = False
-        all_verified = bool(draft.claims)
 
         for claim in draft.claims:
             reasons: list[str] = []
@@ -113,43 +150,145 @@ class CitationVerifier:
                         status = VerificationStatus.UNVERIFIED
                         reasons.append(f"Citation '{cid}' is absent from retrieved evidence.")
                         support_score = 0.0
+                    else:
+                        ev = evidence_by_align[cid]
+                        prov = ev.provision
+                        if (
+                            query.jurisdiction != Jurisdiction.UNKNOWN
+                            and prov.jurisdiction != query.jurisdiction
+                        ):
+                            status = VerificationStatus.CONTRADICTED
+                            reasons.append(
+                                f"Citation '{cid}' jurisdiction '{prov.jurisdiction.value}' does not match query jurisdiction '{query.jurisdiction.value}'."
+                            )
+                            support_score = 0.0
+                            has_contradiction = True
+                        if query.as_of is not None:
+                            if (
+                                prov.effective_from is not None
+                                and query.as_of < prov.effective_from
+                            ):
+                                status = VerificationStatus.CONTRADICTED
+                                reasons.append(
+                                    f"Citation '{cid}' was not in effect as of query date {query.as_of}."
+                                )
+                                support_score = 0.0
+                                has_contradiction = True
+                            if (
+                                prov.effective_until is not None
+                                and query.as_of > prov.effective_until
+                            ):
+                                status = VerificationStatus.CONTRADICTED
+                                reasons.append(
+                                    f"Citation '{cid}' has expired as of query date {query.as_of}."
+                                )
+                                support_score = 0.0
+                                has_contradiction = True
 
             # 2. Check Claim Content vs Evidence Facts
             if status == VerificationStatus.VERIFIED:
-                if not any(claim.claim_key in _ALIGNMENT_CLAIM_KEYS.get(cid, set()) for cid in claim.cited_alignment_ids):
+                if not any(
+                    claim.claim_key in _ALIGNMENT_CLAIM_KEYS.get(cid, set())
+                    for cid in claim.cited_alignment_ids
+                ):
                     status = VerificationStatus.UNVERIFIED
-                    reasons.append("Claim meaning is not supported by the cited statutory provision.")
+                    reasons.append(
+                        "Claim meaning is not supported by the cited statutory provision."
+                    )
                     support_score = 0.0
 
                 claim_facts = [] if claim.tool_derived else extract_legal_facts(claim.conclusion)
                 cited_facts = [
                     extract_legal_facts(evidence_by_align[cid].provision.text)[0]
                     for cid in claim.cited_alignment_ids
+                    if cid in evidence_by_align
                 ]
 
                 if status == VerificationStatus.VERIFIED and claim_facts and cited_facts:
                     cf = claim_facts[0]
+
+                    # Subject obligation check (e.g. employer notice vs worker notice)
+                    subject_obligations = {
+                        "probation_employer_notice_days": "employer",
+                        "probation_employee_departure_notice_days": "worker",
+                        "probation_employee_transfer_notice_months": "worker",
+                    }
+                    expected_subj = subject_obligations.get(claim.claim_key)
+                    if expected_subj and cf.subject and cf.subject != expected_subj:
+                        status = VerificationStatus.CONTRADICTED
+                        reasons.append(
+                            f"Claim subject '{cf.subject}' reverses statutory obligation on '{expected_subj}'."
+                        )
+                        support_score = 0.0
+                        has_contradiction = True
+
+                    # Polarity check: statutory limit violation (e.g. asserting probation may exceed max)
+                    conclusion_cf = claim.conclusion.casefold()
+                    if "exceed" in conclusion_cf and any(
+                        p in conclusion_cf
+                        for p in (
+                            "may exceed",
+                            "can exceed",
+                            "is permitted to exceed",
+                            "يجوز أن تتجاوز",
+                        )
+                    ):
+                        status = VerificationStatus.CONTRADICTED
+                        reasons.append("Claim contradicts statutory limitation (shall not exceed).")
+                        support_score = 0.0
+                        has_contradiction = True
+
                     evidence_quantities = {
                         (quantity.value, quantity.unit)
                         for fact in cited_facts
                         for quantity in fact.quantities
                     }
-                    def quantity_supported(quantity: object) -> bool:
+
+                    def quantity_supported(quantity: LegalQuantity) -> bool:
                         value = quantity.value
                         unit = quantity.unit
                         return (value, unit) in evidence_quantities
 
-                    # Multi-clause claims are supported collectively by their
-                    # citations, such as gratuity calculation plus its cap.
+                    # Multi-clause claims are supported collectively by their citations
                     if not all(quantity_supported(quantity) for quantity in cf.quantities):
                         status = VerificationStatus.CONTRADICTED
                         reasons.append("Numeric quantity/unit mismatch between claim and evidence.")
                         support_score = 0.0
                         has_contradiction = True
 
-            if status != VerificationStatus.VERIFIED:
-                all_verified = False
-            else:
+                    # Check raw numeric consistency for ungrounded fabricated numbers
+                    if not claim.tool_derived and status == VerificationStatus.VERIFIED:
+                        raw_numbers = [
+                            Decimal(v) for v in re.findall(r"\b\d+(?:\.\d+)?\b", claim.conclusion)
+                        ]
+                        allowed_numbers: set[Decimal] = set()
+                        for cid in claim.cited_alignment_ids:
+                            if cid in evidence_by_align:
+                                p = evidence_by_align[cid].provision
+                                if p.article:
+                                    try:
+                                        allowed_numbers.add(Decimal(p.article))
+                                    except Exception:
+                                        pass
+                                if p.clause:
+                                    try:
+                                        allowed_numbers.add(Decimal(p.clause))
+                                    except Exception:
+                                        pass
+                                for fact in cited_facts:
+                                    for n in fact.numeric_values:
+                                        allowed_numbers.add(n)
+                        for num in raw_numbers:
+                            if num not in allowed_numbers:
+                                status = VerificationStatus.CONTRADICTED
+                                reasons.append(
+                                    f"Numeric value {num} in claim conclusion is not supported by cited provision."
+                                )
+                                support_score = 0.0
+                                has_contradiction = True
+                                break
+
+            if status == VerificationStatus.VERIFIED:
                 reasons.append("Statutory citation and facts verified against official provision.")
 
             verified_claims.append(
@@ -158,7 +297,9 @@ class CitationVerifier:
                     claim_key=claim.claim_key,
                     conclusion=claim.conclusion,
                     cited_alignment_ids=claim.cited_alignment_ids,
-                    confidence=claim.confidence if status == VerificationStatus.VERIFIED else Decimal("0.0"),
+                    confidence=claim.confidence
+                    if status == VerificationStatus.VERIFIED
+                    else Decimal("0.0"),
                     tool_derived=claim.tool_derived,
                     verification_status=status,
                     verification_reasons=reasons,
@@ -171,17 +312,26 @@ class CitationVerifier:
         overall_status = VerificationStatus.VERIFIED
         abstention_reason = None
 
-        has_unverified = any(c.verification_status != VerificationStatus.VERIFIED for c in verified_claims)
+        has_unverified = any(
+            c.verification_status != VerificationStatus.VERIFIED for c in verified_claims
+        )
         if has_contradiction:
             overall_status = VerificationStatus.CONTRADICTED
             abstention_reason = "contradictory_evidence"
-            if self.strict:
-                final_answerable = False
+            final_answerable = False
         elif has_unverified or not verified_claims or citation_format_error:
             overall_status = VerificationStatus.UNVERIFIED
-            abstention_reason = "unverified_claim" if not citation_format_error else "citation_format_error"
+            abstention_reason = (
+                "unverified_claim" if not citation_format_error else "citation_format_error"
+            )
             if self.strict:
                 final_answerable = False
+            else:
+                has_any_verified = any(
+                    vc.verification_status == VerificationStatus.VERIFIED for vc in verified_claims
+                )
+                if not has_any_verified:
+                    final_answerable = False
 
         # 4. Render final full text strictly from verified claims
         if final_answerable:
@@ -208,7 +358,8 @@ class CitationVerifier:
             claims=verified_claims,
             full_text=final_text,
             referenced_evidence=[
-                ev for ev in evidence
+                ev
+                for ev in evidence
                 if (ev.provision.alignment_id or ev.provision.provision_id) in structured_citations
             ],
             tool_calls=draft.tool_calls,

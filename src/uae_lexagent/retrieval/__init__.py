@@ -15,7 +15,6 @@ from .embeddings import (
     SentenceTransformerEmbedding,
     get_embedding_provider,
 )
-
 from .fusion import reciprocal_rank_fusion
 from .hybrid import HybridLegalRetriever
 from .indexing import RetrievalIndex, build_retrieval_index

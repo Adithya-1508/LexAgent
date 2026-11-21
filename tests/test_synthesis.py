@@ -9,8 +9,19 @@ from pathlib import Path
 import pytest
 
 from uae_lexagent.ingestion import load_provisions
-from uae_lexagent.models import Jurisdiction, Language, LegalEvidence, LegalProvision, LegalQuery
-from uae_lexagent.retrieval import HybridLegalRetriever, InMemoryRetriever, build_retrieval_index, get_embedding_provider
+from uae_lexagent.models import (
+    Jurisdiction,
+    Language,
+    LegalEvidence,
+    LegalProvision,
+    LegalQuery,
+)
+from uae_lexagent.retrieval import (
+    HybridLegalRetriever,
+    InMemoryRetriever,
+    build_retrieval_index,
+    get_embedding_provider,
+)
 from uae_lexagent.synthesis import (
     CitationVerifier,
     DeterministicTemplateGenerator,
@@ -27,7 +38,9 @@ from uae_lexagent.synthesis import (
 def official_provisions() -> list[LegalProvision]:
     root = Path(__file__).resolve().parents[1]
     fdl = load_provisions(root / "data" / "official_sources" / "fdl_33_2021_provisions.json")
-    cab = load_provisions(root / "data" / "official_sources" / "cabinet_resolution_1_2022_provisions.json")
+    cab = load_provisions(
+        root / "data" / "official_sources" / "cabinet_resolution_1_2022_provisions.json"
+    )
     return fdl + cab
 
 
@@ -37,8 +50,20 @@ def mock_evidence(official_provisions: list[LegalProvision]) -> list[LegalEviden
     p_c1 = prov_map["FDL_33_2021_A9_C1"]
     p_c2 = prov_map["FDL_33_2021_A9_C2"]
     return [
-        LegalEvidence(evidence_id="ev-1", provision=p_c1, retrieval_rank=1, dense_score=0.9, sparse_score=10.0),
-        LegalEvidence(evidence_id="ev-2", provision=p_c2, retrieval_rank=2, dense_score=0.85, sparse_score=9.0),
+        LegalEvidence(
+            evidence_id="ev-1",
+            provision=p_c1,
+            retrieval_rank=1,
+            dense_score=0.9,
+            sparse_score=10.0,
+        ),
+        LegalEvidence(
+            evidence_id="ev-2",
+            provision=p_c2,
+            retrieval_rank=2,
+            dense_score=0.85,
+            sparse_score=9.0,
+        ),
     ]
 
 
@@ -60,12 +85,20 @@ def test_fact_extraction_arabic():
 
 
 def test_answerability_difc_and_adgm():
-    q_difc = LegalQuery(query_id="q1", text="What is probation under DIFC employment law?", jurisdiction=Jurisdiction.DIFC)
+    q_difc = LegalQuery(
+        query_id="q1",
+        text="What is probation under DIFC employment law?",
+        jurisdiction=Jurisdiction.DIFC,
+    )
     d1 = evaluate_answerability(q_difc)
     assert not d1.answerable
     assert d1.reason == "unsupported_jurisdiction"
 
-    q_adgm = LegalQuery(query_id="q2", text="What are ADGM non-compete rules?", jurisdiction=Jurisdiction.ADGM)
+    q_adgm = LegalQuery(
+        query_id="q2",
+        text="What are ADGM non-compete rules?",
+        jurisdiction=Jurisdiction.ADGM,
+    )
     d2 = evaluate_answerability(q_adgm)
     assert not d2.answerable
     assert d2.reason == "unsupported_jurisdiction"
@@ -86,7 +119,10 @@ def test_answerability_historical_gap():
 
 
 def test_answerability_out_of_scope_worker():
-    q = LegalQuery(query_id="q5", text="What are the probation rules for domestic workers / housemaids?")
+    q = LegalQuery(
+        query_id="q5",
+        text="What are the probation rules for domestic workers / housemaids?",
+    )
     d = evaluate_answerability(q)
     assert not d.answerable
     assert d.reason == "out_of_scope_worker_category"
@@ -94,15 +130,25 @@ def test_answerability_out_of_scope_worker():
 
 def test_deterministic_generator_probation_duration(mock_evidence: list[LegalEvidence]):
     gen = DeterministicTemplateGenerator()
-    q = LegalQuery(query_id="q_prob", text="What is the maximum duration of probation under UAE Labour Law?")
-    ans = gen.generate(query=q, evidence=mock_evidence, jurisdiction=Jurisdiction.UAE_ONSHORE, language=Language.EN)
+    q = LegalQuery(
+        query_id="q_prob",
+        text="What is the maximum duration of probation under UAE Labour Law?",
+    )
+    ans = gen.generate(
+        query=q,
+        evidence=mock_evidence,
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+        language=Language.EN,
+    )
     assert ans.answerable
     assert len(ans.claims) == 1
     assert ans.claims[0].claim_key == "probation_max_months"
     assert "FDL_33_2021_A9_C1" in ans.claims[0].cited_alignment_ids
 
 
-def test_verifier_validates_supported_claim(mock_evidence: list[LegalEvidence], official_provisions: list[LegalProvision]):
+def test_verifier_validates_supported_claim(
+    mock_evidence: list[LegalEvidence], official_provisions: list[LegalProvision]
+):
     valid_ids = {p.alignment_id for p in official_provisions if p.alignment_id}
     verifier = CitationVerifier(valid_corpus_alignment_ids=valid_ids, strict=True)
     q = LegalQuery(query_id="q_test", text="What is probation duration?")
@@ -132,7 +178,9 @@ def test_verifier_validates_supported_claim(mock_evidence: list[LegalEvidence], 
     assert grounded.claims[0].verification_status == VerificationStatus.VERIFIED
 
 
-def test_verifier_flags_invalid_citation_and_unsupported_claim(mock_evidence: list[LegalEvidence]):
+def test_verifier_flags_invalid_citation_and_unsupported_claim(
+    mock_evidence: list[LegalEvidence],
+):
     verifier = CitationVerifier(valid_corpus_alignment_ids={"FDL_33_2021_A9_C1"}, strict=True)
     q = LegalQuery(query_id="q_bad_cit", text="Notice period?")
 
@@ -160,7 +208,9 @@ def test_verifier_flags_invalid_citation_and_unsupported_claim(mock_evidence: li
     assert grounded.claims[0].verification_status == VerificationStatus.UNVERIFIED
 
 
-def test_verifier_detects_numeric_contradiction(mock_evidence: list[LegalEvidence], official_provisions: list[LegalProvision]):
+def test_verifier_detects_numeric_contradiction(
+    mock_evidence: list[LegalEvidence], official_provisions: list[LegalProvision]
+):
     valid_ids = {p.alignment_id for p in official_provisions if p.alignment_id}
     verifier = CitationVerifier(valid_corpus_alignment_ids=valid_ids, strict=True)
     q = LegalQuery(query_id="q_contra", text="Employer notice?")
@@ -196,7 +246,10 @@ def test_synthesis_engine_end_to_end(official_provisions: list[LegalProvision]):
     retriever = HybridLegalRetriever(index=index)
     engine = LegalSynthesisEngine(retriever=retriever, provisions=official_provisions)
 
-    q = LegalQuery(query_id="q_e2e", text="Under UAE Labour Law, what is the maximum probation period?")
+    q = LegalQuery(
+        query_id="q_e2e",
+        text="Under UAE Labour Law, what is the maximum probation period?",
+    )
     ans = engine.synthesize(q)
     assert ans.answerable
     assert ans.verification_status == VerificationStatus.VERIFIED
@@ -209,15 +262,23 @@ def test_synthesis_engine_abstains_on_difc(official_provisions: list[LegalProvis
     retriever = InMemoryRetriever(official_provisions)
     engine = LegalSynthesisEngine(retriever=retriever, provisions=official_provisions)
 
-    q = LegalQuery(query_id="q_difc_e2e", text="How does DIFC court handle probation termination?", jurisdiction=Jurisdiction.DIFC)
+    q = LegalQuery(
+        query_id="q_difc_e2e",
+        text="How does DIFC court handle probation termination?",
+        jurisdiction=Jurisdiction.DIFC,
+    )
     ans = engine.synthesize(q)
     assert not ans.answerable
     assert ans.verification_status == VerificationStatus.ABSTAINED
     assert ans.abstention_reason == "unsupported_jurisdiction"
 
 
-def test_engine_abstains_when_jurisdiction_is_ambiguous(official_provisions: list[LegalProvision]):
-    engine = LegalSynthesisEngine(InMemoryRetriever(official_provisions), provisions=official_provisions)
+def test_engine_abstains_when_jurisdiction_is_ambiguous(
+    official_provisions: list[LegalProvision],
+):
+    engine = LegalSynthesisEngine(
+        InMemoryRetriever(official_provisions), provisions=official_provisions
+    )
     answer = engine.synthesize(
         LegalQuery(query_id="q_ambiguous", text="What is the maximum probation period?")
     )
@@ -226,8 +287,12 @@ def test_engine_abstains_when_jurisdiction_is_ambiguous(official_provisions: lis
     assert "No supported template" not in answer.full_text
 
 
-def test_engine_rejects_article_missing_from_indexed_corpus(official_provisions: list[LegalProvision]):
-    engine = LegalSynthesisEngine(InMemoryRetriever(official_provisions), provisions=official_provisions)
+def test_engine_rejects_article_missing_from_indexed_corpus(
+    official_provisions: list[LegalProvision],
+):
+    engine = LegalSynthesisEngine(
+        InMemoryRetriever(official_provisions), provisions=official_provisions
+    )
     answer = engine.synthesize(
         LegalQuery(
             query_id="q_missing_article",
@@ -238,7 +303,9 @@ def test_engine_rejects_article_missing_from_indexed_corpus(official_provisions:
     assert answer.abstention_reason == "unknown_article"
 
 
-def test_strict_verifier_abstains_on_mixed_claim_set(mock_evidence: list[LegalEvidence], official_provisions: list[LegalProvision]):
+def test_strict_verifier_abstains_on_mixed_claim_set(
+    mock_evidence: list[LegalEvidence], official_provisions: list[LegalProvision]
+):
     verifier = CitationVerifier(
         valid_corpus_alignment_ids={p.alignment_id for p in official_provisions if p.alignment_id},
         strict=True,
@@ -271,7 +338,9 @@ def test_strict_verifier_abstains_on_mixed_claim_set(mock_evidence: list[LegalEv
     assert answer.verification_status == VerificationStatus.UNVERIFIED
 
 
-def test_deterministic_generator_ids_are_reproducible(mock_evidence: list[LegalEvidence]):
+def test_deterministic_generator_ids_are_reproducible(
+    mock_evidence: list[LegalEvidence],
+):
     generator = DeterministicTemplateGenerator()
     query = LegalQuery(
         query_id="q_reproducible",

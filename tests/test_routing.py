@@ -21,4 +21,3 @@ def test_conflicting_jurisdictions_require_clarification() -> None:
 
     assert decision.jurisdiction is Jurisdiction.UNKNOWN
     assert decision.requires_clarification
-

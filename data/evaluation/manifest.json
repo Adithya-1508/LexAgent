@@ -18,6 +18,6 @@
     "citation_verification": 20
   },
   "dataset_path": "data/evaluation/benchmark_queries.jsonl",
-  "dataset_sha256": "226ebf3a1d70a28b991a1415823ab79eeffcd5ba88cc1aab78243a75f47a1f8e",
+  "dataset_sha256": "f34097a98d7d63cbe989672408dac0598c3410ad4bd6a92c3acc671f68cb8c91",
   "corpus_fingerprint": "d33e39ee8da99066fc768c7f039eb1b4412a130b47ab9218c21bc20df4de52be"
 }

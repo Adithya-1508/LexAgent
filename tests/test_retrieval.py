@@ -8,17 +8,24 @@ from pathlib import Path
 
 import pytest
 
-from uae_lexagent.evaluation.loader import compute_corpus_fingerprint, load_benchmark_cases
+from uae_lexagent.evaluation.loader import (
+    compute_corpus_fingerprint,
+    load_benchmark_cases,
+)
 from uae_lexagent.ingestion import load_provisions
-from uae_lexagent.models import Jurisdiction, Language, LegalEvidence, LegalProvision, LegalQuery
+from uae_lexagent.models import (
+    Jurisdiction,
+    Language,
+    LegalProvision,
+    LegalQuery,
+)
 from uae_lexagent.retrieval import (
     BM25Index,
     DeterministicHashEmbedding,
     HybridLegalRetriever,
-    IdentityReranker,
+    IndexedProvision,
     InMemoryRetriever,
     InMemoryVectorStore,
-    IndexedProvision,
     RankedCandidate,
     RetrievalFilters,
     build_retrieval_index,
@@ -40,7 +47,9 @@ def _provision(
     effective_until: date | None = None,
 ) -> LegalProvision:
     is_auth = (language == "ar") if is_authoritative is None else is_authoritative
-    trans_of = None if is_auth else (f"{provision_id}-ar" if not alignment_id else f"{alignment_id}_AR")
+    trans_of = (
+        None if is_auth else (f"{provision_id}-ar" if not alignment_id else f"{alignment_id}_AR")
+    )
     return LegalProvision(
         provision_id=provision_id,
         alignment_id=alignment_id or provision_id,
@@ -128,8 +137,14 @@ def test_english_legal_tokenization_preserves_numbers_and_hyphens() -> None:
 
 def test_bm25_index_scoring_and_tie_breaking() -> None:
     p1 = _provision("p1", "probation period notice requirement 14 days", alignment_id="align_p1")
-    p2 = _provision("p2", "probation period notice requirement 30 days during contract", alignment_id="align_p2")
-    p3 = _provision("p3", "annual leave calculation after one year service", alignment_id="align_p3")
+    p2 = _provision(
+        "p2",
+        "probation period notice requirement 30 days during contract",
+        alignment_id="align_p2",
+    )
+    p3 = _provision(
+        "p3", "annual leave calculation after one year service", alignment_id="align_p3"
+    )
 
     bm25 = BM25Index()
     bm25.build([p1, p2, p3])
@@ -143,9 +158,13 @@ def test_bm25_index_scoring_and_tie_breaking() -> None:
 
 
 def test_bm25_index_filters_jurisdiction_and_temporality() -> None:
-    p_onshore = _provision("onshore", "probation termination rules", jurisdiction=Jurisdiction.UAE_ONSHORE)
+    p_onshore = _provision(
+        "onshore", "probation termination rules", jurisdiction=Jurisdiction.UAE_ONSHORE
+    )
     p_difc = _provision("difc", "probation termination rules", jurisdiction=Jurisdiction.DIFC)
-    p_expired = _provision("expired", "probation termination rules", effective_until=date(2023, 1, 1))
+    p_expired = _provision(
+        "expired", "probation termination rules", effective_until=date(2023, 1, 1)
+    )
 
     bm25 = BM25Index()
     bm25.build([p_onshore, p_difc, p_expired])
@@ -178,10 +197,12 @@ def test_in_memory_vector_store_cosine_search_and_validation() -> None:
     p1 = _provision("p1", "text 1")
     p2 = _provision("p2", "text 2")
 
-    store.upsert([
-        IndexedProvision(provision=p1, vector=[1.0, 0.0, 0.0, 0.0]),
-        IndexedProvision(provision=p2, vector=[0.0, 1.0, 0.0, 0.0]),
-    ])
+    store.upsert(
+        [
+            IndexedProvision(provision=p1, vector=[1.0, 0.0, 0.0, 0.0]),
+            IndexedProvision(provision=p2, vector=[0.0, 1.0, 0.0, 0.0]),
+        ]
+    )
 
     results = store.query(vector=[1.0, 0.0, 0.0, 0.0], top_k=2)
     assert len(results) == 2
@@ -203,12 +224,36 @@ def test_reciprocal_rank_fusion_mathematical_combination() -> None:
     p2 = _provision("p2", "text 2", alignment_id="align_2")
 
     dense_candidates = [
-        RankedCandidate(alignment_id="align_1", provision_id="p1", dense_rank=1, dense_score=0.95, provision=p1),
-        RankedCandidate(alignment_id="align_2", provision_id="p2", dense_rank=2, dense_score=0.85, provision=p2),
+        RankedCandidate(
+            alignment_id="align_1",
+            provision_id="p1",
+            dense_rank=1,
+            dense_score=0.95,
+            provision=p1,
+        ),
+        RankedCandidate(
+            alignment_id="align_2",
+            provision_id="p2",
+            dense_rank=2,
+            dense_score=0.85,
+            provision=p2,
+        ),
     ]
     sparse_candidates = [
-        RankedCandidate(alignment_id="align_2", provision_id="p2", sparse_rank=1, sparse_score=5.0, provision=p2),
-        RankedCandidate(alignment_id="align_1", provision_id="p1", sparse_rank=2, sparse_score=3.0, provision=p1),
+        RankedCandidate(
+            alignment_id="align_2",
+            provision_id="p2",
+            sparse_rank=1,
+            sparse_score=5.0,
+            provision=p2,
+        ),
+        RankedCandidate(
+            alignment_id="align_1",
+            provision_id="p1",
+            sparse_rank=2,
+            sparse_score=3.0,
+            provision=p1,
+        ),
     ]
 
     fused = reciprocal_rank_fusion(dense_candidates, sparse_candidates, k=60, alpha=0.5)
@@ -227,10 +272,20 @@ def test_reciprocal_rank_fusion_collapses_bilingual_alignment_pairs() -> None:
     p_en = _provision("en_1", "English Text", alignment_id="align_shared", language="en")
 
     dense_cands = [
-        RankedCandidate(alignment_id="align_shared", provision_id="ar_1", dense_rank=1, provision=p_ar)
+        RankedCandidate(
+            alignment_id="align_shared",
+            provision_id="ar_1",
+            dense_rank=1,
+            provision=p_ar,
+        )
     ]
     sparse_cands = [
-        RankedCandidate(alignment_id="align_shared", provision_id="en_1", sparse_rank=1, provision=p_en)
+        RankedCandidate(
+            alignment_id="align_shared",
+            provision_id="en_1",
+            sparse_rank=1,
+            provision=p_en,
+        )
     ]
 
     fused = reciprocal_rank_fusion(dense_cands, sparse_cands, k=60, alpha=0.5)

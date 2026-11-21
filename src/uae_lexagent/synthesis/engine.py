@@ -10,7 +10,6 @@ from ..routing import classify_jurisdiction
 from .contracts import (
     GeneratorProtocol,
     GroundedLegalAnswer,
-    VerificationStatus,
 )
 from .generators import DeterministicTemplateGenerator
 from .policy import evaluate_answerability
@@ -30,7 +29,9 @@ class LegalSynthesisEngine:
         self.retriever = retriever
         self.generator = generator or DeterministicTemplateGenerator()
         valid_ids = {p.alignment_id for p in provisions if p.alignment_id} if provisions else None
-        self.verifier = verifier or CitationVerifier(valid_corpus_alignment_ids=valid_ids, strict=True)
+        self.verifier = verifier or CitationVerifier(
+            valid_corpus_alignment_ids=valid_ids, strict=True
+        )
         self.provisions = list(provisions or [])
 
     def synthesize(self, query: LegalQuery) -> GroundedLegalAnswer:
@@ -95,10 +96,15 @@ class LegalSynthesisEngine:
         # Filter and validate caller-provided evidence
         valid_evidence: list[LegalEvidence] = []
         canonical_by_id = {provision.provision_id: provision for provision in self.provisions}
-        canonical_alignment_ids = {provision.alignment_id for provision in self.provisions if provision.alignment_id}
+        canonical_alignment_ids = {
+            provision.alignment_id for provision in self.provisions if provision.alignment_id
+        }
         for ev in evidence:
             prov = ev.provision
-            if routed_jurisdiction == Jurisdiction.UNKNOWN or prov.jurisdiction != routed_jurisdiction:
+            if (
+                routed_jurisdiction == Jurisdiction.UNKNOWN
+                or prov.jurisdiction != routed_jurisdiction
+            ):
                 continue
             if prov.legal_domain != "employment":
                 continue

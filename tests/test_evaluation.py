@@ -8,20 +8,16 @@ import pytest
 from uae_lexagent.evaluation import (
     compute_abstention_metrics,
     compute_citation_metrics,
-    compute_jurisdiction_accuracy,
     compute_latency_metrics,
-    compute_multi_hop_accuracy,
     compute_retrieval_metrics,
-    compute_shubhi_signal,
-    compute_temporal_accuracy,
     compute_tool_accuracy,
     load_benchmark_cases,
     load_benchmark_manifest,
-    validate_benchmark_manifest,
     validate_benchmark_integrity,
+    validate_benchmark_manifest,
 )
-from uae_lexagent.evaluation.loader import compute_corpus_fingerprint
 from uae_lexagent.evaluation.evaluator import BaselineEvaluator, run_evaluation
+from uae_lexagent.evaluation.loader import compute_corpus_fingerprint
 from uae_lexagent.ingestion import load_provisions
 from uae_lexagent.models import (
     BenchmarkCase,
@@ -30,9 +26,9 @@ from uae_lexagent.models import (
     ExpectedCalculation,
     ExpectedClaim,
     ExpectedToolCall,
-    PredictedClaim,
     Jurisdiction,
     Language,
+    PredictedClaim,
 )
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -49,30 +45,41 @@ def test_benchmark_manifest_and_jsonl_load() -> None:
     cases = load_benchmark_cases(BENCHMARK_PATH)
     assert len(cases) == 200
 
-    # Verify SHA256 matches manifest
-    file_hash = hashlib.sha256(BENCHMARK_PATH.read_bytes()).hexdigest()
-    assert file_hash == manifest["dataset_sha256"]
+    # Verify SHA256 matches manifest (supporting both raw and LF-normalized hashes across OS platforms)
+    raw_bytes = BENCHMARK_PATH.read_bytes()
+    actual_hash_raw = hashlib.sha256(raw_bytes).hexdigest()
+    actual_hash_lf = hashlib.sha256(raw_bytes.replace(b"\r\n", b"\n")).hexdigest()
+    assert manifest["dataset_sha256"] in {actual_hash_raw, actual_hash_lf}
 
     provisions = load_provisions(DATA_DIR / "official_sources" / "fdl_33_2021_provisions.json")
-    provisions += load_provisions(DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json")
+    provisions += load_provisions(
+        DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json"
+    )
     loaded_manifest = load_benchmark_manifest(MANIFEST_PATH)
-    assert validate_benchmark_manifest(
-        loaded_manifest,
-        BENCHMARK_PATH,
-        cases,
-        provisions,
-        corpus_version="2021-as-amended-2024",
-    ) == []
+    assert (
+        validate_benchmark_manifest(
+            loaded_manifest,
+            BENCHMARK_PATH,
+            cases,
+            provisions,
+            corpus_version="2021-as-amended-2024",
+        )
+        == []
+    )
     assert manifest["corpus_fingerprint"] == compute_corpus_fingerprint(provisions)
 
 
 def test_benchmark_integrity_has_zero_errors() -> None:
     fdl_provs = load_provisions(DATA_DIR / "official_sources" / "fdl_33_2021_provisions.json")
-    cab_provs = load_provisions(DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json")
+    cab_provs = load_provisions(
+        DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json"
+    )
     all_provisions = fdl_provs + cab_provs
 
     cases = load_benchmark_cases(BENCHMARK_PATH)
-    issues = validate_benchmark_integrity(cases, all_provisions, corpus_version="2021-as-amended-2024")
+    issues = validate_benchmark_integrity(
+        cases, all_provisions, corpus_version="2021-as-amended-2024"
+    )
     assert issues == []
 
 
@@ -145,8 +152,18 @@ def test_abstention_metrics_calculation() -> None:
         expected_corpus_version="2021-as-amended-2024",
     )
 
-    pred_ans = EvaluationPrediction(case_id="CASE_ANS", answerable=True, jurisdiction=Jurisdiction.UAE_ONSHORE, latency_ms=5.0)
-    pred_unans = EvaluationPrediction(case_id="CASE_UNANS", answerable=False, jurisdiction=Jurisdiction.UAE_ONSHORE, latency_ms=5.0)
+    pred_ans = EvaluationPrediction(
+        case_id="CASE_ANS",
+        answerable=True,
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+        latency_ms=5.0,
+    )
+    pred_unans = EvaluationPrediction(
+        case_id="CASE_UNANS",
+        answerable=False,
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+        latency_ms=5.0,
+    )
 
     score = compute_abstention_metrics([pred_ans, pred_unans], [case_ans, case_unans])
     assert score.details["precision"] == 1.0
@@ -196,7 +213,12 @@ def test_tool_metrics_calculation() -> None:
 
 def test_latency_metrics_percentiles() -> None:
     preds = [
-        EvaluationPrediction(case_id=f"C_{i}", answerable=True, jurisdiction=Jurisdiction.UAE_ONSHORE, latency_ms=float(i * 10))
+        EvaluationPrediction(
+            case_id=f"C_{i}",
+            answerable=True,
+            jurisdiction=Jurisdiction.UAE_ONSHORE,
+            latency_ms=float(i * 10),
+        )
         for i in range(1, 11)
     ]
     score = compute_latency_metrics(preds)
@@ -210,7 +232,9 @@ def test_latency_metrics_percentiles() -> None:
 def test_shubhi_signal_aggregation_handles_unmeasured_dimensions() -> None:
     cases = load_benchmark_cases(BENCHMARK_PATH)
     fdl_provs = load_provisions(DATA_DIR / "official_sources" / "fdl_33_2021_provisions.json")
-    cab_provs = load_provisions(DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json")
+    cab_provs = load_provisions(
+        DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json"
+    )
     evaluator = BaselineEvaluator(fdl_provs + cab_provs)
 
     score, preds = evaluator.evaluate(cases, corpus_version="2021-as-amended-2024")
@@ -229,7 +253,7 @@ def test_baseline_evaluator_runs_and_generates_reports(tmp_path: Path) -> None:
     out_json = tmp_path / "results.json"
     out_md = tmp_path / "report.md"
 
-    score = run_evaluation(
+    _score = run_evaluation(
         benchmark_path=BENCHMARK_PATH,
         output_json=out_json,
         output_md=out_md,
@@ -251,11 +275,35 @@ def test_baseline_evaluator_runs_and_generates_reports(tmp_path: Path) -> None:
 
 def test_benchmark_data_excludes_unsupported_history_and_uses_article_66_clause_2() -> None:
     cases = load_benchmark_cases(BENCHMARK_PATH)
-    historical = [case for case in cases if case.case_id in {"CASE_TV_001", "CASE_TV_002", "CASE_TV_003", "CASE_TV_004", "CASE_TV_007", "CASE_TV_008"}]
+    historical = [
+        case
+        for case in cases
+        if case.case_id
+        in {
+            "CASE_TV_001",
+            "CASE_TV_002",
+            "CASE_TV_003",
+            "CASE_TV_004",
+            "CASE_TV_007",
+            "CASE_TV_008",
+        }
+    ]
     assert historical
     assert all(not case.expected_answerable and not case.expected_provisions for case in historical)
 
-    language_cases = [case for case in cases if case.case_id in {"CASE_DF_013_EN", "CASE_DF_013_AR", "CASE_CS_006", "CASE_CS_023", "CASE_CV_003_EN", "CASE_CV_003_AR"}]
+    language_cases = [
+        case
+        for case in cases
+        if case.case_id
+        in {
+            "CASE_DF_013_EN",
+            "CASE_DF_013_AR",
+            "CASE_CS_006",
+            "CASE_CS_023",
+            "CASE_CV_003_EN",
+            "CASE_CV_003_AR",
+        }
+    ]
     assert all(case.expected_provisions == ["FDL_33_2021_A66_C2"] for case in language_cases)
 
 
@@ -296,12 +344,14 @@ def test_grounding_and_citation_metrics_require_supported_gold_evidence() -> Non
         jurisdiction=Jurisdiction.UAE_ONSHORE,
         retrieved_alignment_ids=["FDL_33_2021_A9_C1"],
         cited_alignment_ids=["FDL_33_2021_A9_C1"],
-        claims=[PredictedClaim(
-            claim_id="claim-1",
-            conclusion="Six months maximum",
-            cited_alignment_ids=["FDL_33_2021_A9_C1"],
-            supported=True,
-        )],
+        claims=[
+            PredictedClaim(
+                claim_id="claim-1",
+                conclusion="Six months maximum",
+                cited_alignment_ids=["FDL_33_2021_A9_C1"],
+                supported=True,
+            )
+        ],
         latency_ms=1.0,
     )
 
@@ -332,7 +382,9 @@ def test_tool_selection_does_not_use_expected_tool_label() -> None:
     assert prediction.tool_name == "calculate_gratuity"
 
 
-def test_relative_evaluation_paths_work_outside_project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_relative_evaluation_paths_work_outside_project_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     score = run_evaluation(
         benchmark_path=Path("data/evaluation/benchmark_queries.jsonl"),
@@ -343,3 +395,77 @@ def test_relative_evaluation_paths_work_outside_project_root(tmp_path: Path, mon
     assert score.aggregate_score is not None
     assert (tmp_path / "results.json").exists()
     assert (tmp_path / "report.md").exists()
+
+
+def test_validate_official_sources_provenance_success() -> None:
+    """Official-source provenance must verify checksums and report upstream PDF status without concealment."""
+    from uae_lexagent.evaluation.validate import (
+        validate_official_sources_provenance,
+    )
+
+    official_dir = DATA_DIR / "official_sources"
+    provisions = load_provisions(official_dir / "fdl_33_2021_provisions.json")
+    provisions += load_provisions(official_dir / "cabinet_resolution_1_2022_provisions.json")
+
+    passed, errors, report = validate_official_sources_provenance(
+        official_dir=official_dir,
+        repo_root=DATA_DIR.parent,
+        provisions=provisions,
+    )
+
+    assert passed is True
+    assert errors == []
+    assert report["provenance_passed"] is True
+    assert report["verified_sources_count"] == 4
+    assert report["total_sources_in_manifest"] == 4
+    assert len(report["verified_source_ids"]) == 4
+    assert "Arabic is sole authoritative source" in report["authoritative_language_rule"]
+
+    # Explicitly reports unresolved upstream PDF snapshots rather than silently marking as resolved
+    assert report["upstream_chain_status"] == "unresolved_pending_pdf_retrieval"
+    assert len(report["unresolved_upstream_sources"]) == 4
+    assert "MOHRE_FDL_33_2021_AR_PDF" in report["unresolved_upstream_sources"]
+
+
+def test_validate_official_sources_provenance_detects_broken_hash(tmp_path: Path) -> None:
+    """Tampered source file or checksum mismatch must fail provenance check with explicit error."""
+    import shutil
+
+    from uae_lexagent.evaluation.validate import validate_official_sources_provenance
+
+    # Copy official sources to tmp_path
+    tmp_official = tmp_path / "official_sources"
+    shutil.copytree(DATA_DIR / "official_sources", tmp_official)
+
+    # Tamper with a raw text file
+    tampered_file = tmp_official / "raw" / "fdl_33_2021_current_en.txt"
+    tampered_file.write_text("TAMPERED CONTENT", encoding="utf-8")
+
+    provisions = load_provisions(tmp_official / "fdl_33_2021_provisions.json")
+
+    passed, errors, report = validate_official_sources_provenance(
+        official_dir=tmp_official,
+        repo_root=tmp_path,
+        provisions=provisions,
+    )
+
+    assert passed is False
+    assert any("SHA-256 mismatch" in err for err in errors)
+    assert report["provenance_passed"] is False
+
+
+def test_run_corpus_validation_comprehensive() -> None:
+    """run_corpus_validation CLI engine must verify provenance, benchmark integrity, and completeness."""
+    from uae_lexagent.evaluation.validate import run_corpus_validation
+
+    passed, report = run_corpus_validation(data_dir=DATA_DIR)
+    assert passed is True
+    assert report["structural_passed"] is True
+    assert report["provenance"]["provenance_passed"] is True
+
+    completeness = report["completeness"]
+    assert completeness["fdl_33_2021"]["ingested_articles_count"] == 13
+    assert completeness["fdl_33_2021"]["total_statutory_articles"] == 74
+    assert completeness["fdl_33_2021"]["status"] == "partial_mvp"
+    assert completeness["cabinet_resolution_1_2022"]["ingested_articles_count"] == 1
+    assert completeness["total_benchmark_cases"] == 200

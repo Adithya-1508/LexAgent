@@ -6,7 +6,7 @@ import re
 from datetime import date
 from typing import Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from ..models import Jurisdiction, LegalEvidence, LegalProvision, LegalQuery
 from ..routing import classify_jurisdiction
@@ -34,7 +34,11 @@ def evaluate_answerability(
 ) -> AnswerabilityDecision:
     """Evaluate whether the query is legally answerable within the indexed UAE corpus."""
     # 1. Check Jurisdiction
-    if query.jurisdiction in (Jurisdiction.DIFC, Jurisdiction.ADGM, Jurisdiction.OTHER_FREE_ZONE):
+    if query.jurisdiction in (
+        Jurisdiction.DIFC,
+        Jurisdiction.ADGM,
+        Jurisdiction.OTHER_FREE_ZONE,
+    ):
         return AnswerabilityDecision(
             answerable=False,
             reason="unsupported_jurisdiction",
@@ -58,8 +62,14 @@ def evaluate_answerability(
     art_matches = re.findall(r"(?:article|المادة|للمادة)\s*\(?(\d+)\)?", query_text_cf)
     for art_str in art_matches:
         art_num = int(art_str)
-        known_articles = {int(p.article) for p in provisions or () if p.article and p.jurisdiction == Jurisdiction.UAE_ONSHORE}
-        if art_num > MAX_KNOWN_LABOUR_LAW_ARTICLE or (provisions is not None and art_num not in known_articles):
+        known_articles = {
+            int(p.article)
+            for p in provisions or ()
+            if p.article and p.jurisdiction == Jurisdiction.UAE_ONSHORE
+        }
+        if art_num > MAX_KNOWN_LABOUR_LAW_ARTICLE or (
+            provisions is not None and art_num not in known_articles
+        ):
             return AnswerabilityDecision(
                 answerable=False,
                 reason="unknown_article",
@@ -67,7 +77,10 @@ def evaluate_answerability(
             )
 
     # 3. Check for Excluded / Out-of-Scope Worker Categories
-    if any(cat in query_text_cf for cat in ("domestic worker", "housemaid", "nanny", "عامل منزلي", "خدمة منازل")):
+    if any(
+        cat in query_text_cf
+        for cat in ("domestic worker", "housemaid", "nanny", "عامل منزلي", "خدمة منازل")
+    ):
         return AnswerabilityDecision(
             answerable=False,
             reason="out_of_scope_worker_category",

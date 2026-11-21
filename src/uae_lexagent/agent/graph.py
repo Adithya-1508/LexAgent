@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Protocol, Sequence
 
 from ..models import LegalProvision, LegalResponse
@@ -56,25 +55,25 @@ class DeterministicAgentGraph:
         while state.has_step_budget() and not state.is_timed_out():
             # 1. Analyze
             state = analyze_node(state, self.provisions)
-            action = route_after_analysis(state)
+            analysis_action = route_after_analysis(state)
 
-            if action == "abstain":
+            if analysis_action == "abstain":
                 state = abstain_node(state, self.verifier)
                 return finalize_node(state)
 
             # 2. Retrieval Loop
             while state.has_step_budget() and not state.is_timed_out():
                 state = retrieval_node(state, self.retriever, self.provisions)
-                action = route_after_retrieval(state)
+                retrieval_action = route_after_retrieval(state)
 
-                if action == "abstain":
+                if retrieval_action == "abstain":
                     state = abstain_node(state, self.verifier)
                     return finalize_node(state)
 
-                if action == "tool":
+                if retrieval_action == "tool":
                     state = tool_node(state)
-                    action = route_after_tool(state)
-                    if action == "abstain":
+                    tool_action = route_after_tool(state)
+                    if tool_action == "abstain":
                         state = abstain_node(state, self.verifier)
                         return finalize_node(state)
 
@@ -86,14 +85,14 @@ class DeterministicAgentGraph:
 
                 # 4. Verification
                 state = verification_node(state, self.verifier)
-                action = route_after_verification(state)
+                verif_action = route_after_verification(state)
 
-                if action == "finalize":
+                if verif_action == "finalize":
                     return finalize_node(state)
-                elif action == "reformulate":
+                elif verif_action == "reformulate":
                     state = reformulate_node(state, self.provisions)
-                    action = route_after_reformulation(state)
-                    if action == "retrieve":
+                    reform_action = route_after_reformulation(state)
+                    if reform_action == "retrieve":
                         continue  # Loop back to retrieval
                     else:
                         state = abstain_node(state, self.verifier)
@@ -118,14 +117,29 @@ class LangGraphAgentAdapter:
     def invoke(self, initial_state: AgentState) -> LegalResponse:
         """Invoke LangGraph and extract final canonical LegalResponse."""
         state_dict = initial_state.model_dump()
-        result_dict = self.graph.invoke(
-            state_dict,
-            config={"recursion_limit": max(25, initial_state.max_steps + 5)},
-        )
-
-        # Reconstruct AgentState from resulting state dictionary
-        res_state = AgentState.model_validate(result_dict)
-        return finalize_node(res_state)
+        try:
+            result_dict = self.graph.invoke(
+                state_dict,
+                config={"recursion_limit": max(25, initial_state.max_steps + 5)},
+            )
+            res_state = AgentState.model_validate(result_dict)
+            return finalize_node(res_state)
+        except Exception as exc:
+            initial_state.current_status = AgentStatus.ABSTAINED
+            initial_state.abstention_reason = (
+                "exhausted_budget"
+                if "recursion" in str(exc).casefold()
+                else "graph_runtime_failure"
+            )
+            initial_state.errors.append(f"LangGraph execution exception: {type(exc).__name__}")
+            initial_state.add_trace(
+                node_name="langgraph_adapter",
+                action="graph_invoke",
+                status="failed",
+                rationale=f"LangGraph execution failed ({type(exc).__name__}). Safely routed to abstention.",
+                duration_ms=0.0,
+            )
+            return finalize_node(initial_state)
 
 
 def build_langgraph_agent(
@@ -138,7 +152,9 @@ def build_langgraph_agent(
     try:
         from langgraph.graph import END, StateGraph
     except ImportError as exc:
-        raise ImportError("langgraph and langchain-core are required to use build_langgraph_agent()") from exc
+        raise ImportError(
+            "langgraph and langchain-core are required to use build_langgraph_agent()"
+        ) from exc
 
     prov_list = list(provisions)
 
@@ -171,7 +187,7 @@ def build_langgraph_agent(
         state_obj = AgentState.model_validate(s)
         return abstain_node(state_obj, verifier).model_dump()
 
-    builder = StateGraph(dict)
+    builder: Any = StateGraph(dict)
 
     builder.add_node("analyze", _analyze)
     builder.add_node("retrieve", _retrieve)

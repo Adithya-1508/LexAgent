@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
 
 from ..models import LegalQuery
 from .contracts import RankedCandidate
@@ -36,7 +36,7 @@ class SentenceTransformerReranker:
 
     def __init__(self, model_id: str = "BAAI/bge-reranker-base") -> None:
         self.model_id = model_id
-        self._model = None
+        self._model: Any = None
 
     def _load(self) -> None:
         if self._model is None:

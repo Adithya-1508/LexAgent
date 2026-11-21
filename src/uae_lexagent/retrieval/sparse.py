@@ -8,8 +8,13 @@ from collections import Counter
 from datetime import date
 from typing import Sequence
 
-from ..models import Jurisdiction, Language, LegalProvision
-from .contracts import IndexedProvision, RankedCandidate, RetrievalFilters, matches_retrieval_filters
+from ..models import Language, LegalProvision
+from .contracts import (
+    IndexedProvision,
+    RankedCandidate,
+    RetrievalFilters,
+    matches_retrieval_filters,
+)
 
 _ARABIC_DIACRITICS = re.compile(r"[\u064b-\u065f\u0670]")
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+(?:[-_][a-z0-9]+)*|[\u0600-\u06ff]+")

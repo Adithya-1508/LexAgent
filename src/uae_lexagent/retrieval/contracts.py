@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
-from typing import Any, Protocol, Sequence
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,7 +28,10 @@ def matches_retrieval_filters(provision: LegalProvision, filters: RetrievalFilte
     """Apply the canonical hard metadata policy to one provision."""
     if filters is None:
         return True
-    if filters.jurisdiction != Jurisdiction.UNKNOWN and provision.jurisdiction != filters.jurisdiction:
+    if (
+        filters.jurisdiction != Jurisdiction.UNKNOWN
+        and provision.jurisdiction != filters.jurisdiction
+    ):
         return False
     if filters.as_of is not None:
         if provision.effective_from is not None and filters.as_of < provision.effective_from:

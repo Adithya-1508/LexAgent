@@ -2,13 +2,10 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from uae_lexagent import (
     Jurisdiction,
-    Language,
     LegalProvision,
-    LegalQuery,
     is_valid_official_url,
     load_document_metadata,
     load_provisions,
@@ -19,7 +16,6 @@ from uae_lexagent import (
     validate_source_manifest,
     validate_temporal_consistency,
 )
-from uae_lexagent.retrieval import InMemoryRetriever
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "official_sources"
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -83,15 +79,21 @@ def test_clause_2_vs_clause_3_correction() -> None:
     prov_path = DATA_DIR / "fdl_33_2021_provisions.json"
     provisions = load_provisions(prov_path)
 
-    c2_en = [p for p in provisions if p.article == "9" and p.clause == "2" and p.language == "en"][0]
-    c3_en = [p for p in provisions if p.article == "9" and p.clause == "3" and p.language == "en"][0]
+    c2_en = [p for p in provisions if p.article == "9" and p.clause == "2" and p.language == "en"][
+        0
+    ]
+    c3_en = [p for p in provisions if p.article == "9" and p.clause == "3" and p.language == "en"][
+        0
+    ]
 
     assert "successfully completes the probation period" in c2_en.text
     assert "move during the probation period to work for another employer" in c3_en.text
 
 
 def test_strict_url_hostname_validation() -> None:
-    assert is_valid_official_url("https://www.mohre.gov.ae/en/laws-and-regulations/laws.aspx") is True
+    assert (
+        is_valid_official_url("https://www.mohre.gov.ae/en/laws-and-regulations/laws.aspx") is True
+    )
     assert is_valid_official_url("https://uaelegislation.gov.ae") is True
     assert is_valid_official_url("https://mohre.gov.ae.attacker.com/malicious") is False
     assert is_valid_official_url("http://www.mohre.gov.ae") is False  # Insecure HTTP rejected
@@ -138,8 +140,8 @@ def test_cabinet_resolution_1_2022_bilingual_sources() -> None:
 
 
 def test_unaligned_provisions_rejected() -> None:
-    doc = load_document_metadata(DATA_DIR / "fdl_33_2021_document.json")
-    sources = load_source_manifest(DATA_DIR / "manifest.json")
+    _doc = load_document_metadata(DATA_DIR / "fdl_33_2021_document.json")
+    _sources = load_source_manifest(DATA_DIR / "manifest.json")
 
     unaligned_prov = LegalProvision(
         provision_id="FDL_33_2021_A99_C1_EN",
@@ -182,11 +184,13 @@ def test_article_9_clause_4_and_7_preserve_all_relevant_conditions() -> None:
 
 @pytest.mark.parametrize(
     ("article", "expected_clauses"),
-    (("42", {str(number) for number in range(1, 10)}),
-     ("43", {str(number) for number in range(1, 6)}),
-     ("51", {str(number) for number in range(1, 9)}),
-     ("52", {"1"}),
-     ("66", {"1", "2"})),
+    (
+        ("42", {str(number) for number in range(1, 10)}),
+        ("43", {str(number) for number in range(1, 6)}),
+        ("51", {str(number) for number in range(1, 9)}),
+        ("52", {"1"}),
+        ("66", {"1", "2"}),
+    ),
 )
 def test_statutory_articles_are_clause_granular(article: str, expected_clauses: set[str]) -> None:
     provisions = load_provisions(DATA_DIR / "fdl_33_2021_provisions.json")
@@ -214,7 +218,7 @@ def test_article_51_and_66_no_longer_merge_numbered_clauses() -> None:
 
 def test_source_path_escape_is_rejected() -> None:
     sources = load_source_manifest(DATA_DIR / "manifest.json")
-    sources[0].local_path = "..\\outside.txt"
+    sources[0].local_path = "../outside.txt"
 
     issues = validate_source_manifest(sources, base_dir=PROJECT_ROOT)
     assert any("escapes the configured base directory" in issue for issue in issues)

@@ -61,14 +61,10 @@ def reciprocal_rank_fusion(
 
     for align_id, data in candidates_by_align.items():
         dense_contrib = (
-            (alpha / (k + data["dense_rank"]))
-            if data["dense_rank"] is not None
-            else 0.0
+            (alpha / (k + data["dense_rank"])) if data["dense_rank"] is not None else 0.0
         )
         sparse_contrib = (
-            ((1.0 - alpha) / (k + data["sparse_rank"]))
-            if data["sparse_rank"] is not None
-            else 0.0
+            ((1.0 - alpha) / (k + data["sparse_rank"])) if data["sparse_rank"] is not None else 0.0
         )
         fused_score = dense_contrib + sparse_contrib
 
