@@ -57,7 +57,21 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
   - `reviewer_id: str | None = None`
   - `reviewed_at_utc: datetime | None = None`
 
-## 3. Legacy Migration Protocol (Zero Automatic Promotion)
+## 3. Legacy Migration Protocol & Temporal Cutoff Governance
+
+### 3.1 Temporal Cutoff & Current-Law Governance (`effective_as_of_max`)
+1. **Four Temporal Dimensions:**
+   - `release_manifest.built_at_utc`: Generation timestamp of the corpus release artifact.
+   - `release_manifest.effective_as_of_max`: Upper bound statutory date verified against the Official Gazette (e.g. `2024-08-31`).
+   - `LegalDocument.last_verified_at_utc` / `LegalProvision.reviewed_at_utc`: Entity-level audit timestamps.
+   - `query.as_of`: Query-specified evaluation date.
+2. **Current-Law Query Handling (`query.as_of is None`):**
+   - The engine tentatively binds to `effective_as_of_max`.
+   - **Mandatory Disclosure:** Must include `TEMPORAL_CUTOFF_DISCLOSURE` stating that advice is verified through `effective_as_of_max` and does not assert unverified post-cutoff law.
+   - **Known Amendment Abstention:** If the query topic touches an instrument with post-cutoff amendments registered in the `BoundaryRegistry`, the engine fails closed with `abstention_reason="stale_or_incomplete_amendment_coverage"`.
+   - **Future Date Abstention:** Queries specifying `as_of > effective_as_of_max` strictly fail closed with `abstention_reason="temporal_uncertainty"`.
+
+### 3.2 Legacy Migration Protocol (Zero Automatic Promotion)
 
 1. Existing Phase 5.1 files (`fdl_33_2021_provisions.json`, `cabinet_resolution_1_2022_provisions.json`, `manifest.json`) load with `publication_state = LEGACY_UNVERIFIED` and `authenticity_tier = LEGACY_UNATTESTED`.
 2. Production retrieval (`allow_legacy_unverified=False`) refuses to serve `LEGACY_UNVERIFIED` records.

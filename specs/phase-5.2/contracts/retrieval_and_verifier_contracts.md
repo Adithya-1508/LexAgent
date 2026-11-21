@@ -43,9 +43,39 @@ class RetrievalFilters(BaseModel):
   - Indexes `LEGACY_UNVERIFIED` ONLY when `include_legacy_unverified=True` (for Phase 5.1 legacy test fixtures).
   - Routes `UNRESOLVED_HISTORICAL` and `BLOCKED_LEGAL_TOPIC` exclusively to `quarantine_registry`.
 
-## 3. Exact `as_of` Resolution Semantics
+## 3. Exact `as_of` Resolution Semantics & Current-Law Safety Contract
 
-Let `resolved_as_of = filters.as_of or query.as_of or index.effective_as_of_max`.
+To ensure that a historical corpus verification cutoff is **never silently presented as current law**, LexAgent distinguishes explicit historical date queries from undated / current-law queries, enforcing deterministic abstention and mandatory disclosure rules.
+
+### 3.1 Input Temporal Disambiguation
+
+Let `system_cutoff = index.effective_as_of_max` (the latest statutory date for which comprehensive Official Gazette verification is completed in `release_manifest.json`, e.g., `2024-08-31`).
+
+1. **Explicit Historical Date (`query.as_of is not None`):**
+   - If `query.as_of <= system_cutoff`: `resolved_as_of = query.as_of`. Evaluated against the historical legal state in force on that date.
+   - If `query.as_of > system_cutoff`: **Fail closed immediately** with `abstention_reason="temporal_uncertainty"` (the system refuses to extrapolate or assert unverified legal rules for dates beyond verified gazette coverage).
+
+2. **Undated / Current-Law Query (`query.as_of is None`):**
+   - The query implies an inquiry into current, active law. The engine tentatively binds `resolved_as_of = system_cutoff`, subject to the **Current-Law Safety Gate** below.
+
+### 3.2 Current-Law Safety Gate (Mandatory Abstention & Disclosure)
+
+When evaluating an undated query:
+1. **Known Subsequent Amendment Check (Fail-Closed Abstention):**
+   - If any candidate provision or article belongs to a statutory topic with known post-cutoff amendments registered in the `BoundaryRegistry` (e.g., WPS rules under Ministerial Resolution No. 340 of 2026, or post-cutoff resolutions modifying dispute procedures), the engine **MUST FAIL CLOSED** and abstain with:
+     `abstention_reason="stale_or_incomplete_amendment_coverage"`
+   - The response must explicitly inform the user that statutory or regulatory changes occurred after the verification cutoff date (`system_cutoff`) and are not yet fully ingested into the verified corpus.
+2. **Incomplete Coverage Check:**
+   - If the target document has `completeness != DocumentCompleteness.COMPLETE` (e.g., `PARTIAL_VERIFIED` or `PARTIAL_MVP`) and the query touches uningested articles, the system must fail closed with `abstention_reason="incomplete_statutory_coverage"`.
+3. **Mandatory Temporal Cutoff Disclosure:**
+   - If the undated query passes the amendment check and returns verified provisions, the system **MUST NOT** state or imply that the answer reflects today's law without qualification.
+   - The response MUST attach an explicit caveat disclosure (`TEMPORAL_CUTOFF_DISCLOSURE`) to `GroundedLegalAnswer.caveat_disclosures`:
+     `"This answer is grounded exclusively in UAE federal employment legislation verified through {system_cutoff}. Any statutory amendments, executive regulations, or ministerial decisions enacted after this date are not reflected."`
+   - `CitationVerifier` enforces that this temporal caveat is rendered in the final output text; missing disclosure triggers verifier abstention (`ABSTAINED`, `undisclosed_temporal_caveat`).
+4. **Staleness Horizon Guardrail:**
+   - If the wall-clock execution date exceeds `system_cutoff` by more than 180 days, the engine flags `corpus_staleness_detected=True`. If the caller has not explicitly configured `allow_stale_corpus=True`, production queries abstain with `abstention_reason="corpus_verification_expired"`.
+
+### 3.3 Provision Selection Algorithm on `resolved_as_of`
 
 For any candidate `logical_provision_id`:
 1. **Uncertainty Window Check (First):** If `quarantine_registry` contains an `UNRESOLVED_HISTORICAL` version for `logical_provision_id` with `uncertainty_window_start <= resolved_as_of <= uncertainty_window_end` -> **fail closed** with `abstention_reason="temporal_uncertainty"`.
@@ -56,9 +86,8 @@ For any candidate `logical_provision_id`:
    - `lifecycle_state in {IN_FORCE, SUPERSEDED}` (excluding `ENACTED_PENDING_COMMENCEMENT`, `REPEALED`, `SUSPENDED_GAP`).
 4. **Cardinality Enforcement:**
    - `count == 0`: Not in force on `resolved_as_of` -> excluded (abstain `not_in_force_on_date` if no evidence remains).
-   - `count == 1`: Selected deterministically. Attach `resolved_as_of` to retrieval metadata.
+   - `count == 1`: Selected deterministically. Attach `resolved_as_of` and `temporal_cutoffs` to retrieval metadata.
    - `count > 1`: Overlapping active versions (defense-in-depth beyond `RV-04`) -> **fail closed** with `abstention_reason="ambiguous_temporal_overlap"`. Never arbitrarily pick one.
-5. **Missing `as_of` (`None`):** Always binds to `index.effective_as_of_max` (from `release_manifest.json`) and records `resolved_as_of` on `GroundedLegalAnswer`. Superseded historical versions are never returned when `as_of is None`.
 
 ## 4. Fail-Closed `CitationVerifier` & Claim-Key Registry Contract (`synthesis/verifier.py`)
 
