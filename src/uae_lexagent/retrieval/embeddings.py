@@ -55,7 +55,10 @@ class DeterministicHashEmbedding:
             if len(token) >= 3:
                 for i in range(len(token) - 2):
                     trigram = token[i : i + 3]
-                    h_tri = int(hashlib.md5(trigram.encode("utf-8")).hexdigest()[:8], 16)
+                    h_tri = int(
+                        hashlib.md5(trigram.encode("utf-8"), usedforsecurity=False).hexdigest()[:8],
+                        16,
+                    )
                     idx_tri = h_tri % self._dimension
                     vec[idx_tri] += 1.0
 
