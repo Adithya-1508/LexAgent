@@ -1,0 +1,14 @@
+{
+  "release_version": "5.2.0-alpha.1",
+  "schema_version": "5.2.0",
+  "built_at_utc": "invalid_date_time",
+  "effective_as_of_max": "invalid_date",
+  "corpus_fingerprint": "not_a_sha256_hash",
+  "claim_key_registry_sha256": "short",
+  "documents": [],
+  "artifact_checksums": {},
+  "publication_summary": {
+    "verified_publishable": -1
+  },
+  "quarantine_ledger": []
+}

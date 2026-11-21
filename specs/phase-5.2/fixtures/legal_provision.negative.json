@@ -1,0 +1,12 @@
+{
+  "provision_id": "PROV_INVALID_JURISDICTION",
+  "document_id": "FDL_33_2021",
+  "source_id": "GOV_UAE_FDL_33_2021_HTML",
+  "jurisdiction": "invalid_jurisdiction_name",
+  "legal_domain": "employment",
+  "article": "51",
+  "language": "ar",
+  "is_authoritative": true,
+  "text": "نص المادة",
+  "source_url": "not_a_valid_url"
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexagent.local/schemas/phase-5.2/manual_attestation.schema.json",
+  "title": "ManualAttestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "attestation_id",
+    "source_id",
+    "operator_id",
+    "acquired_at_utc",
+    "claimed_source_url",
+    "portal_navigation_steps",
+    "capture_evidence_ref",
+    "independent_cross_check_ref",
+    "independent_cross_check_passed",
+    "corroboration_type"
+  ],
+  "properties": {
+    "attestation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operator_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "acquired_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "claimed_source_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "portal_navigation_steps": {
+      "type": "string",
+      "minLength": 10
+    },
+    "capture_evidence_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "independent_cross_check_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "independent_cross_check_passed": {
+      "type": "boolean"
+    },
+    "corroboration_type": {
+      "type": "string",
+      "enum": [
+        "none_operator_only",
+        "automated_mirror_match",
+        "gov_pdf_digital_signature",
+        "automated_html_cross_check"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  }
+}

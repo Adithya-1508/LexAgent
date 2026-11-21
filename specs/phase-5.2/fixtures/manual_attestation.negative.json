@@ -1,0 +1,12 @@
+{
+  "attestation_id": "ATTEST_INVALID_CORROBORATION",
+  "source_id": "GOV_UAE_FDL_20_2023_AR_PDF",
+  "operator_id": "ENG_OPERATOR_01",
+  "acquired_at_utc": "2026-11-20T10:00:00Z",
+  "claimed_source_url": "https://uaelegislation.gov.ae/ar/constitution/modifications/1297/download",
+  "portal_navigation_steps": "Short",
+  "capture_evidence_ref": "evidence.png",
+  "independent_cross_check_ref": "ref",
+  "independent_cross_check_passed": true,
+  "corroboration_type": "invalid_corroboration_type"
+}

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexagent.local/schemas/phase-5.2/source_snapshot.schema.json",
+  "title": "LegalSource (Phase 5.2)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_id",
+    "document_id",
+    "language",
+    "publisher",
+    "source_url",
+    "local_path",
+    "retrieved_at",
+    "sha256",
+    "is_authoritative",
+    "extraction_method"
+  ],
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "language": {
+      "type": "string",
+      "enum": [
+        "en",
+        "ar"
+      ]
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "local_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retrieved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "page_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "is_authoritative": {
+      "type": "boolean"
+    },
+    "artifact_type": {
+      "type": "string",
+      "enum": [
+        "raw_html",
+        "raw_pdf",
+        "derived_text"
+      ],
+      "default": "raw_pdf"
+    },
+    "source_role": {
+      "type": "string",
+      "enum": [
+        "extraction_primary",
+        "archival_reference"
+      ],
+      "default": "extraction_primary"
+    },
+    "derived_from_source_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "extraction_tool": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "extraction_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "extraction_method": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "html_dom",
+        "pdf_text",
+        "ocr"
+      ]
+    },
+    "authenticity_tier": {
+      "type": "string",
+      "enum": [
+        "GOV_AUTOMATED_TLS_VERIFIED",
+        "GOV_INDEPENDENTLY_CORROBORATED",
+        "OPERATOR_ATTESTED_ONLY",
+        "LEGACY_UNATTESTED"
+      ],
+      "default": "LEGACY_UNATTESTED"
+    },
+    "attestation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "tls_cert_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "redistribution_clearance": {
+      "type": "string",
+      "enum": [
+        "verified_public_law",
+        "restricted_do_not_commit",
+        "pending_review"
+      ],
+      "default": "pending_review"
+    }
+  }
+}

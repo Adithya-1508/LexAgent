@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexagent.local/schemas/phase-5.2/amendment_edge.schema.json",
+  "title": "AmendmentEdge",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "edge_id",
+    "amending_document_id",
+    "amending_article_ref",
+    "target_logical_provision_id",
+    "action",
+    "effective_date",
+    "new_version_id",
+    "source_id"
+  ],
+  "properties": {
+    "edge_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "amending_document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "amending_article_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_logical_provision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "replaces",
+        "amends",
+        "adds",
+        "repeals",
+        "implements"
+      ]
+    },
+    "effective_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "prior_version_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "new_version_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

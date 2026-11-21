@@ -1,0 +1,12 @@
+{
+  "audit_id": "AUDIT_FDL_33_2021_ART_51_01_2022",
+  "version_id": "FDL_33_2021_ART_51_01@2022-02-02",
+  "ar_provision_id": "PROV_FDL_33_2021_ART_51_01_AR",
+  "en_provision_id": "PROV_FDL_33_2021_ART_51_01_EN",
+  "structural_alignment_status": "exact_match",
+  "numeric_consistency_status": "pass",
+  "semantic_equivalence_status": "human_reviewed_equivalent",
+  "discrepancy_notes": null,
+  "reviewer_id": "LEGAL_REVIEWER_01",
+  "reviewed_at_utc": "2026-11-20T10:00:00Z"
+}

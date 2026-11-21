@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexagent.local/schemas/phase-5.2/bilingual_alignment_audit.schema.json",
+  "title": "BilingualAlignmentAudit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audit_id",
+    "version_id",
+    "ar_provision_id",
+    "structural_alignment_status",
+    "numeric_consistency_status",
+    "semantic_equivalence_status"
+  ],
+  "properties": {
+    "audit_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ar_provision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "en_provision_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "structural_alignment_status": {
+      "type": "string",
+      "enum": [
+        "exact_match",
+        "clause_mismatch",
+        "unaligned_no_official_en"
+      ]
+    },
+    "numeric_consistency_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "mismatch_flagged",
+        "not_applicable"
+      ]
+    },
+    "semantic_equivalence_status": {
+      "type": "string",
+      "enum": [
+        "unverified_semantically",
+        "human_reviewed_equivalent",
+        "human_reviewed_discrepancy"
+      ],
+      "default": "unverified_semantically"
+    },
+    "discrepancy_notes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "reviewer_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "reviewed_at_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "default": null
+    }
+  }
+}
