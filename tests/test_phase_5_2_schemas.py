@@ -13,7 +13,10 @@ import json
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+
+pytest.importorskip("jsonschema")
+
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped] # noqa: E402
 
 SCHEMA_DIR = Path("specs/phase-5.2/contracts")
 FIXTURE_DIR = Path("specs/phase-5.2/fixtures")
