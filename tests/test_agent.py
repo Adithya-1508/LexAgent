@@ -325,7 +325,7 @@ def test_gratuity_tool_input_validation() -> None:
 def test_gratuity_tool_legal_basis_gating() -> None:
     query = LegalQuery(
         query_id="Q_GATE_001",
-        text="Calculate gratuity for basic salary AED 12000 and 4.0 years of service.",
+        text="Calculate gratuity for a full-time expatriate employee with basic salary AED 12000 and 4.0 years of service.",
     )
     # State without the required legal basis "FDL_33_2021_A51_C2"
     state_without_basis = AgentState(query=query)
@@ -349,7 +349,7 @@ def test_tool_result_binding_into_synthesis(
 ) -> None:
     query = LegalQuery(
         query_id="Q_BIND_001",
-        text="Calculate gratuity for basic salary AED 10000 and 2.0 years of service under UAE Labour Law.",
+        text="Calculate gratuity for a full-time expatriate employee with basic salary AED 10000 and 2.0 years of service under UAE Labour Law.",
     )
     gen = DeterministicTemplateGenerator()
     state = AgentState(
@@ -816,7 +816,7 @@ def test_agent_calculation_is_verified_and_idempotent(
     canonical_provisions: list[LegalProvision],
 ) -> None:
     orchestrator = LegalAgentOrchestrator(retriever=retriever, provisions=canonical_provisions)
-    query = "Under UAE Labour Law, calculate gratuity for basic salary AED 10000 and 2.0 years of service."
+    query = "Under UAE Labour Law, calculate gratuity for a full-time foreign worker with basic salary AED 10000 and 2.0 years of service."
     first = orchestrator.run(query)
     second = orchestrator.run(query)
 
@@ -872,7 +872,7 @@ def test_tool_calculation_contradiction_overwrites_full_text(
     )
     query = LegalQuery(
         query_id="Q_TOOL_CONTRA",
-        text="Under UAE Labour Law, calculate gratuity for 10000 salary and 3 years",
+        text="Under UAE Labour Law, calculate gratuity for a full-time foreign worker with 10000 salary and 3 years",
     )
     prov = next(p for p in canonical_provisions if p.alignment_id == "FDL_33_2021_A51_C2")
     evidence = [LegalEvidence(evidence_id="ev_a51", provision=prov, retrieval_rank=1)]
@@ -1017,3 +1017,82 @@ def test_expanded_alignment_keys_verify_article_53_and_66(
     assert grounded.verification_status == VerificationStatus.VERIFIED
     assert len(grounded.claims) == 1
     assert grounded.claims[0].verification_status == VerificationStatus.VERIFIED
+
+
+def test_tool_node_abstains_when_nationality_unknown() -> None:
+    """Tool node must abstain without assuming nationality when missing from query."""
+    query = LegalQuery(
+        query_id="Q_NO_NAT",
+        text="Calculate gratuity for a full-time employee with basic salary AED 10000 and 2.0 years of service.",
+    )
+    state = AgentState(query=query)
+    state.deduplicated_alignment_ids.add("FDL_33_2021_A51_C2")
+    state = tool_node(state)
+
+    assert state.current_status == AgentStatus.ABSTAINED
+    assert state.abstention_reason == "missing_eligibility_facts"
+    assert len(state.tool_calls) == 0
+    assert any(t.status == "abstained" and "missing_facts" in t.metadata for t in state.trace)
+
+
+def test_tool_node_abstains_when_work_pattern_unknown() -> None:
+    """Tool node must abstain without assuming work pattern when missing from query."""
+    query = LegalQuery(
+        query_id="Q_NO_WP",
+        text="Calculate gratuity for a foreign worker with basic salary AED 10000 and 2.0 years of service.",
+    )
+    state = AgentState(query=query)
+    state.deduplicated_alignment_ids.add("FDL_33_2021_A51_C2")
+    state = tool_node(state)
+
+    assert state.current_status == AgentStatus.ABSTAINED
+    assert state.abstention_reason == "missing_eligibility_facts"
+    assert len(state.tool_calls) == 0
+
+
+def test_tool_node_abstains_when_both_facts_unknown() -> None:
+    """Tool node must abstain when neither nationality nor work pattern is specified."""
+    query = LegalQuery(
+        query_id="Q_NO_BOTH",
+        text="Calculate gratuity for basic salary AED 10000 and 2.0 years of service.",
+    )
+    state = AgentState(query=query)
+    state.deduplicated_alignment_ids.add("FDL_33_2021_A51_C2")
+    state = tool_node(state)
+
+    assert state.current_status == AgentStatus.ABSTAINED
+    assert state.abstention_reason == "missing_eligibility_facts"
+    assert len(state.tool_calls) == 0
+
+
+def test_tool_node_abstains_on_part_time_missing_contractual_hours() -> None:
+    """Tool node must record non-calculable result and abstain when part-time hours missing."""
+    query = LegalQuery(
+        query_id="Q_PT_NO_HOURS",
+        text="Calculate gratuity for a part-time foreign worker with basic salary AED 10000 and 2.0 years of service.",
+    )
+    state = AgentState(query=query)
+    state.deduplicated_alignment_ids.add("FDL_33_2021_A51_C2")
+    state = tool_node(state)
+
+    assert state.current_status == AgentStatus.ABSTAINED
+    assert state.abstention_reason == "missing_contractual_hours"
+    assert len(state.tool_calls) == 1
+    assert state.tool_calls[0].result["total_gratuity"] is None
+    assert state.tool_calls[0].result["eligibility_status"] == "non_calculable_missing_hours"
+
+
+def test_tool_node_succeeds_on_part_time_with_explicit_contractual_hours() -> None:
+    """Tool node must calculate prorated gratuity when contractual and full-time hours provided."""
+    query = LegalQuery(
+        query_id="Q_PT_HOURS",
+        text="Calculate gratuity for a part-time foreign worker with basic salary AED 10000 and 2.0 years of service working 20 hours out of 40 full-time hours.",
+    )
+    state = AgentState(query=query)
+    state.deduplicated_alignment_ids.add("FDL_33_2021_A51_C2")
+    state = tool_node(state)
+
+    assert state.current_status == AgentStatus.RUNNING
+    assert len(state.tool_calls) == 1
+    assert state.tool_calls[0].result["total_gratuity"] == 7000.0
+    assert state.tool_calls[0].result["eligibility_status"] == "part_time_prorated"

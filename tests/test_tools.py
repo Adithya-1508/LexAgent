@@ -67,3 +67,63 @@ def test_gratuity_statutory_eligibility_and_caps() -> None:
     )
     assert inp.work_pattern == "full_time"
     assert inp.unpaid_absence_days == Decimal("0")
+
+
+def test_gratuity_part_time_with_contractual_hours() -> None:
+    """Part-time calculation under Cabinet Res 1/2022 Art 30 prorates by contractual hours."""
+    from uae_lexagent.tools import GratuityCalculationResult, calculate_gratuity
+
+    res = calculate_gratuity(
+        basic_salary=10000,
+        service_years=2,
+        work_pattern="part_time",
+        contract_working_hours=20,
+        full_time_working_hours=40,
+    )
+
+    # Full time is 2 * 21/30 * 10000 = 14000; 20/40 = 50% -> 7000.00
+    assert res["total_gratuity"] == 7000.0
+    assert res["eligibility_status"] == "part_time_prorated"
+    assert res["statutory_basis"] == "CABINET_RES_1_2022_A30_C1"
+    assert "50.00%" in res["note"]
+
+    # Strict schema validation
+    validated = GratuityCalculationResult.model_validate(res)
+    assert validated.total_gratuity == 7000.0
+
+
+def test_gratuity_part_time_without_contractual_hours_returns_non_calculable() -> None:
+    """Part-time without hours must return total_gratuity=None without misleading 0.0 amount."""
+    from uae_lexagent.tools import GratuityCalculationResult, calculate_gratuity
+
+    res = calculate_gratuity(
+        basic_salary=10000,
+        service_years=2,
+        work_pattern="part_time",
+    )
+
+    assert res["total_gratuity"] is None
+    assert res["eligibility_status"] == "non_calculable_missing_hours"
+    assert res["statutory_basis"] == "CABINET_RES_1_2022_A30_C1"
+    assert "requires contractual working hours" in res["note"]
+
+    validated = GratuityCalculationResult.model_validate(res)
+    assert validated.total_gratuity is None
+    assert validated.eligibility_status == "non_calculable_missing_hours"
+
+
+def test_gratuity_input_contract_hours_exceeding_full_time_rejected() -> None:
+    """Contract hours greater than full-time equivalent must be rejected."""
+    import pytest
+    from pydantic import ValidationError
+
+    from uae_lexagent.tools import GratuityInput
+
+    with pytest.raises(ValidationError):
+        GratuityInput(
+            basic_salary=Decimal("10000"),
+            service_years=Decimal("3"),
+            work_pattern="part_time",
+            contract_working_hours=Decimal("45"),
+            full_time_working_hours=Decimal("40"),
+        )

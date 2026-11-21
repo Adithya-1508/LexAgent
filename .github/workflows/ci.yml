@@ -21,10 +21,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -53,10 +53,10 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
@@ -72,7 +72,7 @@ jobs:
           python -m pytest -q --junitxml=reports/test-results-${{ matrix.python-version }}.xml
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         if: always()
         with:
           name: test-results-py${{ matrix.python-version }}
@@ -85,10 +85,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -107,10 +107,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -120,7 +120,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,retrieval,agent]"
 
-      - name: Validate corpus manifests, checksums, and evaluation loader
+      - name: Run explicit corpus and benchmark validation CLI
+        run: python -m uae_lexagent.evaluation.validate
+
+      - name: Validate corpus manifests, checksums, and evaluation loader via pytest
         run: python -m pytest -q tests/test_evaluation.py tests/test_ingestion.py
 
   dependency-isolation:
@@ -142,10 +145,10 @@ jobs:
             test_target: "tests/test_agent.py tests/test_synthesis.py tests/test_legal_safety.py"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -164,10 +167,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -180,21 +183,27 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build --sdist --wheel
 
-      - name: Test clean wheel installation in isolated environment
+      - name: Test clean wheel installation in isolated environment outside source checkout
         run: |
+          python -m venv /tmp/isolated_packaging_venv
+          source /tmp/isolated_packaging_venv/bin/activate
+          python -m pip install --upgrade pip
           python -m pip install dist/*.whl
-          python -c "import uae_lexagent; print('Installed uae-lexagent successfully from', uae_lexagent.__file__)"
+          cd /tmp
+          python -c "import uae_lexagent; print('Installed uae-lexagent successfully from', uae_lexagent.__file__); assert '/tmp/isolated_packaging_venv' in uae_lexagent.__file__"
+          python -c "from uae_lexagent.models import LegalQuery, Jurisdiction, Language; q = LegalQuery(query_id='smoke', text='smoke test', jurisdiction=Jurisdiction.UAE_ONSHORE, language=Language.EN); print('Smoke model passed:', q.query_id)"
+          python -c "from uae_lexagent.tools import calculate_gratuity; res = calculate_gratuity(10000, 2); print('Smoke tool passed:', res['total_gratuity'])"
 
   security-scan:
-    name: Security Vulnerability Scan (Bandit)
+    name: Static Security Scan (Bandit)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.12"
           cache: "pip"
@@ -206,3 +215,26 @@ jobs:
 
       - name: Run Bandit static security scan
         run: bandit -r src/ -ll -q
+
+  vulnerability-audit:
+    name: Dependency Vulnerability Audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+          python -m pip install pip-audit
+
+      - name: Run pip-audit scan
+        run: python -m pip_audit --desc

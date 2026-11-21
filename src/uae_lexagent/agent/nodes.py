@@ -475,13 +475,81 @@ def tool_node(state: AgentState) -> AgentState:
                 state.abstention_reason = "invalid_tool_input"
                 return state
 
-            is_uae_national = bool(
-                re.search(r"\b(emirati|uae\s+national|local\s+citizen|مواطن|إماراتي)\b", query_cf)
-            )
-            is_part_time = bool(re.search(r"\b(part[-\s]?time|دوام\s+جزئي|عمل\s+جزئي)\b", query_cf))
-            work_pattern: Literal["full_time", "part_time"] = (
-                "part_time" if is_part_time else "full_time"
-            )
+            # 1. Worker Nationality Status: Expatriate/Foreign Worker vs UAE National (GPSSA Pension)
+            is_uae_national: bool | None = None
+            if re.search(
+                r"\b(emirati|uae\s+national|local\s+citizen|national\s+citizen|مواطن|إماراتي)\b",
+                query_cf,
+            ):
+                is_uae_national = True
+            elif re.search(
+                r"\b(foreign\s+worker|foreign\s+employee|foreign\s+national|expatriate|expat|non-uae\s+national|non-national|non-emirati|وافد|عامل\s+وافد|موظف\s+وافد|أجنبي|غير\s+مواطن)\b",
+                query_cf,
+            ):
+                is_uae_national = False
+
+            # 2. Work Pattern: Full-time under Article 51(2) vs Part-time under Cabinet Res 1/2022 Article 30
+            work_pattern: Literal["full_time", "part_time"] | None = None
+            if re.search(r"\b(part[-\s]?time|دوام\s+جزئي|عمل\s+جزئي)\b", query_cf):
+                work_pattern = "part_time"
+            elif re.search(r"\b(full[-\s]?time|دوام\s+كامل|عمل\s+كامل)\b", query_cf):
+                work_pattern = "full_time"
+
+            # 3. Fact Completeness Gate: Silent factual assumptions are prohibited under legal safety policy
+            missing_facts: list[str] = []
+            if is_uae_national is None:
+                missing_facts.append(
+                    "worker nationality status (foreign worker eligible under Article 51 vs UAE national covered by GPSSA pension under Article 51(1))"
+                )
+            if work_pattern is None:
+                missing_facts.append(
+                    "work pattern (full-time under Article 51(2) vs part-time under Cabinet Resolution No. 1 of 2022 Article 30)"
+                )
+
+            if missing_facts:
+                state.current_status = AgentStatus.ABSTAINED
+                state.abstention_reason = "missing_eligibility_facts"
+                duration_ms = (time.perf_counter() - start_time) * 1000.0
+                state.add_trace(
+                    node_name="tool_node",
+                    action="fact_completeness_check",
+                    status="abstained",
+                    rationale=(
+                        f"Statutory calculation cannot proceed due to missing factual prerequisites: "
+                        f"{'; '.join(missing_facts)}. Under UAE Labour Law, silent assumptions on "
+                        "nationality and work pattern are prohibited."
+                    ),
+                    duration_ms=duration_ms,
+                    metadata={"missing_facts": missing_facts},
+                )
+                return state
+
+            assert is_uae_national is not None
+            assert work_pattern is not None
+
+            # 4. Extract Contractual Working Hours for Part-Time Workers
+            contract_working_hours: Decimal | None = None
+            full_time_working_hours: Decimal | None = None
+            if work_pattern == "part_time":
+                ratio_match = re.search(
+                    r"(\d+(?:\.\d+)?)\s*(?:hours?|hrs)?\s*(?:out\s+of|\/)\s*(\d+(?:\.\d+)?)\s*(?:full[-\s]?time\s*)?(?:hours?|hrs)?",
+                    query_cf,
+                )
+                if ratio_match:
+                    contract_working_hours = Decimal(ratio_match.group(1))
+                    full_time_working_hours = Decimal(ratio_match.group(2))
+                else:
+                    c_match = re.search(
+                        r"(\d+(?:\.\d+)?)\s*(?:contract(?:ual)?\s*hours?|hours?\s*(?:per\s*week|weekly|in\s*contract)|ساعات\s*العمل\s*التعاقدية|ساعة\s*تعاقدية)",
+                        query_cf,
+                    )
+                    ft_match = re.search(
+                        r"(\d+(?:\.\d+)?)\s*(?:full[-\s]?time\s*hours?|hours?\s*full[-\s]?time|ساعات\s*الدوام\s*الكامل)",
+                        query_cf,
+                    )
+                    if c_match and ft_match:
+                        contract_working_hours = Decimal(c_match.group(1))
+                        full_time_working_hours = Decimal(ft_match.group(1))
 
             absence_match = re.search(
                 r"(?:unpaid\s+leave|unpaid\s+absence|غياب\s+بدون\s+راتب|إجازة\s+بدون\s+راتب)\s*(?:is|=|:)?\s*(\d+(?:\.\d+)?)",
@@ -499,6 +567,18 @@ def tool_node(state: AgentState) -> AgentState:
                     and prior_call.arguments.get("work_pattern") == work_pattern
                     and prior_call.arguments.get("unpaid_absence_days")
                     == float(unpaid_absence_days)
+                    and prior_call.arguments.get("contract_working_hours")
+                    == (
+                        float(contract_working_hours)
+                        if contract_working_hours is not None
+                        else None
+                    )
+                    and prior_call.arguments.get("full_time_working_hours")
+                    == (
+                        float(full_time_working_hours)
+                        if full_time_working_hours is not None
+                        else None
+                    )
                 ):
                     state.tool_results = prior_call.result or {}
                     state.add_trace(
@@ -517,6 +597,8 @@ def tool_node(state: AgentState) -> AgentState:
                 work_pattern=work_pattern,
                 is_uae_national=is_uae_national,
                 unpaid_absence_days=unpaid_absence_days,
+                contract_working_hours=contract_working_hours,
+                full_time_working_hours=full_time_working_hours,
             )
 
             calc_res = calculate_gratuity(
@@ -525,6 +607,8 @@ def tool_node(state: AgentState) -> AgentState:
                 is_uae_national=is_uae_national,
                 work_pattern=work_pattern,
                 unpaid_absence_days=unpaid_absence_days,
+                contract_working_hours=contract_working_hours,
+                full_time_working_hours=full_time_working_hours,
             )
             exec_latency_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -537,6 +621,16 @@ def tool_node(state: AgentState) -> AgentState:
                     "is_uae_national": is_uae_national,
                     "work_pattern": work_pattern,
                     "unpaid_absence_days": float(unpaid_absence_days),
+                    "contract_working_hours": (
+                        float(contract_working_hours)
+                        if contract_working_hours is not None
+                        else None
+                    ),
+                    "full_time_working_hours": (
+                        float(full_time_working_hours)
+                        if full_time_working_hours is not None
+                        else None
+                    ),
                 },
                 result=calc_res,
                 valid_schema=True,
@@ -545,6 +639,25 @@ def tool_node(state: AgentState) -> AgentState:
             )
             state.tool_calls.append(tool_call)
             state.tool_results = calc_res
+
+            # Handle non-calculable part-time gratuity due to missing hours
+            if calc_res.get("total_gratuity") is None:
+                state.current_status = AgentStatus.ABSTAINED
+                state.abstention_reason = "missing_contractual_hours"
+                duration_ms = (time.perf_counter() - start_time) * 1000.0
+                state.add_trace(
+                    node_name="tool_node",
+                    action="execute_gratuity",
+                    status="abstained",
+                    rationale=(
+                        "Part-time gratuity entitlement is non-calculable without contractual and "
+                        "full-time working hours under Cabinet Resolution No. 1 of 2022 Article 30."
+                    ),
+                    duration_ms=duration_ms,
+                    output_summary=f"Result: {calc_res}",
+                    metadata={"eligibility_status": calc_res["eligibility_status"]},
+                )
+                return state
 
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             state.add_trace(
@@ -669,7 +782,8 @@ def verification_node(state: AgentState, verifier: CitationVerifier) -> AgentSta
 
     # Tool consistency validation: verify calculated claims match tool output
     if state.tool_results and grounded.claims:
-        expected_total = Decimal(str(state.tool_results.get("total_gratuity", "0.0")))
+        total_grat = state.tool_results.get("total_gratuity")
+        expected_total = Decimal(str(total_grat)) if total_grat is not None else None
         for vc in grounded.claims:
             if (
                 vc.tool_derived
@@ -679,7 +793,7 @@ def verification_node(state: AgentState, verifier: CitationVerifier) -> AgentSta
                 number_matches = {
                     Decimal(value) for value in re.findall(r"\b\d+(?:\.\d+)?\b", vc.conclusion)
                 }
-                if expected_total not in number_matches:
+                if expected_total is None or expected_total not in number_matches:
                     vc.verification_status = VerificationStatus.CONTRADICTED
                     vc.verification_reasons.append(
                         "Claim numeric value does not match validated tool calculation."

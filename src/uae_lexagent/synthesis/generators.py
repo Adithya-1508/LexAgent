@@ -268,24 +268,47 @@ class DeterministicTemplateGenerator:
         if tool_calls:
             for tc in tool_calls:
                 if tc.tool_name == "calculate_gratuity" and tc.valid_schema and tc.result:
-                    align_ids = ["FDL_33_2021_A51_C2"]
-                    tot = float(tc.result.get("total_gratuity", 0.0))
-                    sal = float(tc.result.get("basic_salary", 0.0))
-                    yrs = float(tc.result.get("service_years", 0.0))
-                    claims.append(
-                        DraftLegalClaim(
-                            claim_id=claim_id(f"gratuity_calc_{tot}"),
-                            claim_key="gratuity_calculation",
-                            conclusion=(
+                    total_grat = tc.result.get("total_gratuity")
+                    if total_grat is not None:
+                        tot = float(total_grat)
+                        sal = float(tc.result.get("basic_salary", 0.0))
+                        yrs = float(tc.result.get("service_years", 0.0))
+                        stat_basis = tc.result.get("statutory_basis", "FDL_33_2021_A51_C2")
+                        align_ids = [stat_basis]
+                        if stat_basis == "CABINET_RES_1_2022_A30_C1":
+                            conclusion_text = (
+                                f"وفقاً للمادة 30 من قرار مجلس الوزراء رقم 1 لسنة 2022 والمادة 51، تبلغ مكافأة نهاية الخدمة النسبية {tot:.2f} درهم لراتب أساسي {sal:.2f} ومدة خدمة {yrs:.1f} سنة."
+                                if is_arabic
+                                else f"Under Cabinet Resolution No. 1 of 2022 Article 30 and Article 51, the prorated statutory end-of-service gratuity is AED {tot:.2f} for basic salary AED {sal:.2f} and {yrs:.1f} years of service."
+                            )
+                        elif tc.result.get("eligibility_status") == "ineligible_pension_applicable":
+                            conclusion_text = (
+                                "وفقاً للمادة 51(1)، يخضع العاملون المواطنون لقانون المعاشات والتأمينات الاجتماعية ولا يستحقون مكافأة نهاية الخدمة."
+                                if is_arabic
+                                else "Under Article 51(1), UAE national workers are covered under the Federal Pension and Social Security Law rather than statutory end-of-service gratuity."
+                            )
+                        elif tc.result.get("eligibility_status") == "ineligible_under_one_year":
+                            conclusion_text = (
+                                "وفقاً للمادة 51(2)، لا يستحق العامل الذي تقل مدة خدمته عن سنة واحدة مكافأة نهاية الخدمة."
+                                if is_arabic
+                                else "Under Article 51(2), a worker with less than one continuous year of service is not entitled to end-of-service gratuity."
+                            )
+                        else:
+                            conclusion_text = (
                                 f"وفقاً للمادة 51، تبلغ مكافأة نهاية الخدمة المستحقة {tot:.2f} درهم لراتب أساسي {sal:.2f} ومدة خدمة {yrs:.1f} سنة."
                                 if is_arabic
                                 else f"Under Article 51, the statutory end-of-service gratuity is AED {tot:.2f} for basic salary AED {sal:.2f} and {yrs:.1f} years of service."
-                            ),
-                            cited_alignment_ids=align_ids,
-                            confidence=Decimal("1.0"),
-                            tool_derived=True,
+                            )
+                        claims.append(
+                            DraftLegalClaim(
+                                claim_id=claim_id(f"gratuity_calc_{tot}"),
+                                claim_key="gratuity_calculation",
+                                conclusion=conclusion_text,
+                                cited_alignment_ids=align_ids,
+                                confidence=Decimal("1.0"),
+                                tool_derived=True,
+                            )
                         )
-                    )
 
         # Construct summary and full text with inline bracketed citations
         summary_lines = []

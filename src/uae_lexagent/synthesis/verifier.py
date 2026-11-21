@@ -1,4 +1,31 @@
-"""Citation verification gate and statutory fact-checking engine."""
+"""Citation verification gate and statutory fact-checking engine.
+
+Verification Boundaries and Formal Entailment Limitations:
+-----------------------------------------------------------
+The CitationVerifier enforces a deterministic verification gate designed for high-stakes
+legal AI reasoning. It verifies:
+1. Provenance: Every cited alignment ID exists in the authoritative legal corpus.
+2. Groundedness: Every cited provision was retrieved and present in current state evidence.
+3. Jurisdiction: Provisions match the query jurisdiction (UAE onshore vs free zones).
+4. Temporal validity: Provisions were in force on the query's effective date (`as_of`).
+5. Subject-predicate consistency: Statutory duty assignments (e.g. employer vs worker obligations)
+   are not inverted.
+6. Quantities and units: All numeric limits and duration units (e.g. 14 days, 6 months) match
+   evidence exactly.
+7. Polarity: Statutory prohibitions ("shall not exceed") are strictly preserved.
+8. Computational grounding: Tool-derived numbers are verified against deterministic statutory engines.
+
+Limitations & Non-Guarantees:
+- Heuristic and structural checks do NOT constitute a formal mathematical or first-order logic
+  entailment proof for arbitrary open-domain prose.
+- Open-ended LLM generations that exhibit subtle semantic drift, novel phrasing, or unmodeled
+  legal nuances outside the structured claim ontology cannot be guaranteed to entail by
+  surface-level checks alone; therefore, the engine mandates structured claims with explicit
+  `claim_key` mappings and canonical alignment citations, failing closed whenever verification
+  criteria are not strictly met.
+- The verifier is an automated technical safeguard and does not replace human legal review
+  by licensed UAE advocates.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +57,7 @@ _ALIGNMENT_CLAIM_KEYS: dict[str, set[str]] = {
     "FDL_33_2021_A9_C6": {"probation_work_permit_ban_years"},
     "FDL_33_2021_A10_C1": {"non_compete_max_years", "non_compete_limits"},
     "FDL_33_2021_A43_C2": {"notice_period_range_days", "notice_period_days"},
+    "FDL_33_2021_A51_C1": {"pension_exclusion", "gratuity_calculation"},
     "FDL_33_2021_A51_C2": {
         "gratuity_calculation",
         "gratuity_first_five_years",
@@ -38,7 +66,7 @@ _ALIGNMENT_CLAIM_KEYS: dict[str, set[str]] = {
     "FDL_33_2021_A51_C6": {"gratuity_calculation", "gratuity_cap_years"},
     "FDL_33_2021_A53_C1": {"final_dues_payment_days"},
     "FDL_33_2021_A66_C2": {"arabic_language_prevails", "arabic_precedence"},
-    "CABINET_RES_1_2022_A30_C1": {"part_time_gratuity"},
+    "CABINET_RES_1_2022_A30_C1": {"part_time_gratuity", "gratuity_calculation"},
 }
 
 

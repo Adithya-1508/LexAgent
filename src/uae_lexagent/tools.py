@@ -7,9 +7,9 @@ versioned, verified provision before it is used in a production answer.
 from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class GratuityPolicy(BaseModel):
@@ -28,6 +28,15 @@ class GratuityInput(BaseModel):
     work_pattern: Literal["full_time", "part_time"] = "full_time"
     is_uae_national: bool = False
     unpaid_absence_days: Decimal = Field(default=Decimal("0"), ge=0)
+    contract_working_hours: Decimal | None = Field(default=None, gt=0)
+    full_time_working_hours: Decimal | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_working_hours(self) -> Self:
+        if self.contract_working_hours is not None and self.full_time_working_hours is not None:
+            if self.contract_working_hours > self.full_time_working_hours:
+                raise ValueError("contract_working_hours cannot exceed full_time_working_hours.")
+        return self
 
 
 class GratuityResult(BaseModel):
@@ -39,13 +48,19 @@ class GratuityResult(BaseModel):
 
 
 class GratuityCalculationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     basic_salary: float
     service_years: float
-    total_gratuity: float
+    total_gratuity: float | None = None
     currency: str = "AED"
     statutory_basis: str
     eligibility_status: Literal[
-        "eligible", "ineligible_under_one_year", "ineligible_pension_applicable"
+        "eligible",
+        "ineligible_under_one_year",
+        "ineligible_pension_applicable",
+        "part_time_prorated",
+        "non_calculable_missing_hours",
     ]
     note: str | None = None
 
@@ -82,8 +97,13 @@ def calculate_gratuity(
     is_uae_national: bool = False,
     work_pattern: str = "full_time",
     unpaid_absence_days: float | Decimal = Decimal("0"),
+    contract_working_hours: float | Decimal | None = None,
+    full_time_working_hours: float | Decimal | None = None,
 ) -> dict[str, Any]:
-    """Calculate UAE statutory gratuity under Federal Decree-Law No. 33 of 2021 Article 51."""
+    """Calculate UAE statutory gratuity under Federal Decree-Law No. 33 of 2021 Article 51
+
+    and Cabinet Resolution No. 1 of 2022 Article 30.
+    """
     try:
         salary = Decimal(str(basic_salary))
         years = Decimal(str(service_years))
@@ -106,42 +126,68 @@ def calculate_gratuity(
             "Invalid gratuity input: service_years and unpaid_absence_days must be non-negative."
         )
 
+    # Optional working hours validation
+    contract_hours: Decimal | None = None
+    full_time_hours: Decimal | None = None
+    if contract_working_hours is not None:
+        try:
+            contract_hours = Decimal(str(contract_working_hours))
+        except Exception as exc:
+            raise ValueError(f"Invalid contract_working_hours: {type(exc).__name__}") from exc
+        if not contract_hours.is_finite() or contract_hours <= Decimal("0"):
+            raise ValueError(
+                "Invalid contract_working_hours: must be strictly positive and finite."
+            )
+
+    if full_time_working_hours is not None:
+        try:
+            full_time_hours = Decimal(str(full_time_working_hours))
+        except Exception as exc:
+            raise ValueError(f"Invalid full_time_working_hours: {type(exc).__name__}") from exc
+        if not full_time_hours.is_finite() or full_time_hours <= Decimal("0"):
+            raise ValueError(
+                "Invalid full_time_working_hours: must be strictly positive and finite."
+            )
+
+    if contract_hours is not None and full_time_hours is not None:
+        if contract_hours > full_time_hours:
+            raise ValueError("contract_working_hours cannot exceed full_time_working_hours.")
+
+    # 1. Article 51(1): UAE National pension exclusion
     if is_uae_national:
-        return {
-            "basic_salary": float(salary),
-            "service_years": float(years),
-            "total_gratuity": 0.0,
-            "currency": "AED",
-            "statutory_basis": "FDL_33_2021_A51_C1",
-            "eligibility_status": "ineligible_pension_applicable",
-            "note": "UAE national workers are covered under the Federal Pension and Social Security Law rather than end-of-service gratuity under Article 51(1).",
-        }
+        res = GratuityCalculationResult(
+            basic_salary=float(salary),
+            service_years=float(years),
+            total_gratuity=0.0,
+            currency="AED",
+            statutory_basis="FDL_33_2021_A51_C1",
+            eligibility_status="ineligible_pension_applicable",
+            note=(
+                "UAE national workers are covered under the Federal Pension and Social Security "
+                "Law rather than end-of-service gratuity under Article 51(1)."
+            ),
+        )
+        return res.model_dump()
 
-    if work_pattern == "part_time":
-        return {
-            "basic_salary": float(salary),
-            "service_years": float(years),
-            "total_gratuity": 0.0,
-            "currency": "AED",
-            "statutory_basis": "CABINET_RES_1_2022_A30_C1",
-            "eligibility_status": "part_time_prorated",
-            "note": "Part-time worker end-of-service gratuity is prorated according to contract working hours under Cabinet Resolution No. 1 of 2022 Article 30.",
-        }
-
-    # Article 51(2): Days of absence from work without pay shall not be included in calculating the service period
+    # Article 51(2): Days of absence from work without pay shall not be included in calculating service
     effective_years = max(Decimal("0.0"), years - (absence / Decimal("365.0")))
 
     if effective_years < Decimal("1.0"):
-        return {
-            "basic_salary": float(salary),
-            "service_years": float(years),
-            "total_gratuity": 0.0,
-            "currency": "AED",
-            "statutory_basis": "FDL_33_2021_A51_C2",
-            "eligibility_status": "ineligible_under_one_year",
-            "note": "A worker who has completed less than 1 year of continuous service is not entitled to end-of-service gratuity under Article 51(2).",
-        }
+        res = GratuityCalculationResult(
+            basic_salary=float(salary),
+            service_years=float(years),
+            total_gratuity=0.0,
+            currency="AED",
+            statutory_basis="FDL_33_2021_A51_C2",
+            eligibility_status="ineligible_under_one_year",
+            note=(
+                "A worker who has completed less than 1 year of continuous service is not entitled "
+                "to end-of-service gratuity under Article 51(2)."
+            ),
+        )
+        return res.model_dump()
 
+    # Baseline full-time statutory entitlement under Article 51(2) & 51(3)
     daily_wage = salary / Decimal("30")
     first_5_years = min(effective_years, Decimal("5.0"))
     gratuity_first_5 = daily_wage * Decimal("21") * first_5_years
@@ -149,19 +195,59 @@ def calculate_gratuity(
     additional_years = max(Decimal("0.0"), effective_years - Decimal("5.0"))
     gratuity_additional = daily_wage * Decimal("30") * additional_years
 
-    total = (gratuity_first_5 + gratuity_additional).quantize(
+    full_time_total = (gratuity_first_5 + gratuity_additional).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
     max_cap = salary * Decimal("24")  # 2 years total basic salary cap (Article 51(3))
+    final_full_time = min(full_time_total, max_cap)
 
-    final_amount = min(total, max_cap)
+    # 2. Part-Time Work Pattern Proration under Cabinet Resolution No. 1 of 2022 Article 30
+    if work_pattern == "part_time":
+        if contract_hours is not None and full_time_hours is not None:
+            proration_ratio = contract_hours / full_time_hours
+            prorated_amount = (final_full_time * proration_ratio).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            res = GratuityCalculationResult(
+                basic_salary=float(salary),
+                service_years=float(years),
+                total_gratuity=float(prorated_amount),
+                currency="AED",
+                statutory_basis="CABINET_RES_1_2022_A30_C1",
+                eligibility_status="part_time_prorated",
+                note=(
+                    f"Part-time worker end-of-service gratuity prorated at "
+                    f"{(proration_ratio * 100).quantize(Decimal('0.01'))}% "
+                    f"({contract_hours}/{full_time_hours} hours) under Cabinet Resolution "
+                    f"No. 1 of 2022 Article 30 against Article 51 baseline AED {final_full_time}."
+                ),
+            )
+            return res.model_dump()
 
-    return {
-        "basic_salary": float(salary),
-        "service_years": float(years),
-        "total_gratuity": float(final_amount),
-        "currency": "AED",
-        "statutory_basis": "FDL_33_2021_A51_C2",
-        "eligibility_status": "eligible",
-        "note": "Calculated under Article 51(2) with 2-year basic wage ceiling under Article 51(3).",
-    }
+        res = GratuityCalculationResult(
+            basic_salary=float(salary),
+            service_years=float(years),
+            total_gratuity=None,
+            currency="AED",
+            statutory_basis="CABINET_RES_1_2022_A30_C1",
+            eligibility_status="non_calculable_missing_hours",
+            note=(
+                "Part-time gratuity calculation under Cabinet Resolution No. 1 of 2022 Article 30 "
+                "requires contractual working hours and full-time equivalent hours to determine the "
+                "statutory proration percentage. Amount cannot be determined from basic salary and "
+                "service years alone."
+            ),
+        )
+        return res.model_dump()
+
+    # 3. Standard full-time worker calculation under Article 51(2)-(3)
+    res = GratuityCalculationResult(
+        basic_salary=float(salary),
+        service_years=float(years),
+        total_gratuity=float(final_full_time),
+        currency="AED",
+        statutory_basis="FDL_33_2021_A51_C2",
+        eligibility_status="eligible",
+        note="Calculated under Article 51(2) with 2-year basic wage ceiling under Article 51(3).",
+    )
+    return res.model_dump()
