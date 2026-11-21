@@ -11,8 +11,8 @@ from ..models import (
     DimensionScore,
     EvaluationPrediction,
     Language,
-    ShubhiSignalScore,
     LegalProvision,
+    ShubhiSignalScore,
 )
 
 DEFAULT_DIMENSION_WEIGHTS: dict[str, float] = {
@@ -96,8 +96,12 @@ def compute_retrieval_metrics(
             hit_rates[k].append(1.0 if len(matched) > 0 else 0.0)
 
     mrr = statistics.mean(rr_scores) if rr_scores else 0.0
-    mean_recalls = {f"recall@{k}": statistics.mean(recalls[k]) if recalls[k] else 0.0 for k in k_values}
-    mean_hit_rates = {f"hit_rate@{k}": statistics.mean(hit_rates[k]) if hit_rates[k] else 0.0 for k in k_values}
+    mean_recalls = {
+        f"recall@{k}": statistics.mean(recalls[k]) if recalls[k] else 0.0 for k in k_values
+    }
+    mean_hit_rates = {
+        f"hit_rate@{k}": statistics.mean(hit_rates[k]) if hit_rates[k] else 0.0 for k in k_values
+    }
 
     # Use HitRate@3 as canonical retrieval dimension score
     canonical_score = mean_hit_rates.get("hit_rate@3", mrr)
@@ -281,7 +285,9 @@ def compute_tool_accuracy(
 
     selection_acc = (correct_selection / total_tool_cases) if total_tool_cases > 0 else 0.0
     arg_acc = (correct_arguments / total_tool_cases) if total_tool_cases > 0 else 0.0
-    calc_acc = (correct_calculations / total_calculation_cases) if total_calculation_cases > 0 else None
+    calc_acc = (
+        (correct_calculations / total_calculation_cases) if total_calculation_cases > 0 else None
+    )
 
     components = [selection_acc, arg_acc]
     if calc_acc is not None:
@@ -310,7 +316,9 @@ def _arguments_equal(actual: dict[str, object], expected: dict[str, object]) -> 
     for key in actual:
         actual_value = actual[key]
         expected_value = expected[key]
-        if isinstance(actual_value, (int, float, Decimal)) and isinstance(expected_value, (int, float, Decimal)):
+        if isinstance(actual_value, (int, float, Decimal)) and isinstance(
+            expected_value, (int, float, Decimal)
+        ):
             if Decimal(str(actual_value)) != Decimal(str(expected_value)):
                 return False
         elif actual_value != expected_value:
@@ -323,7 +331,6 @@ def compute_bilingual_consistency(
     cases: list[BenchmarkCase],
 ) -> DimensionScore:
     """Evaluate whether EN and AR query pairs yield consistent decisions and retrieved references."""
-    case_map = {c.case_id: c for c in cases}
     pred_map = {p.case_id: p for p in predictions}
 
     pairs: dict[str, list[BenchmarkCase]] = {}
@@ -350,21 +357,28 @@ def compute_bilingual_consistency(
         total_pairs += 1
 
         # Consistency requires both language variants to reach the same gold reference.
-        jurisdiction_match = (p_en.jurisdiction == p_ar.jurisdiction)
-        answerability_match = (p_en.answerable == p_ar.answerable)
+        jurisdiction_match = p_en.jurisdiction == p_ar.jurisdiction
+        answerability_match = p_en.answerable == p_ar.answerable
         expected = set(c_en.expected_provisions)
         top_en = set(p_en.retrieved_alignment_ids[:3])
         top_ar = set(p_ar.retrieved_alignment_ids[:3])
-        retrieval_overlap = (
-            top_en == top_ar
-            and (not expected or (expected & top_en and expected & top_ar))
+        retrieval_overlap = top_en == top_ar and (
+            not expected or (expected & top_en and expected & top_ar)
         )
         en_claim_state = {
-            (claim.claim_key or claim.claim_id, claim.supported, bool(set(claim.cited_alignment_ids) & expected))
+            (
+                claim.claim_key or claim.claim_id,
+                claim.supported,
+                bool(set(claim.cited_alignment_ids) & expected),
+            )
             for claim in p_en.claims
         }
         ar_claim_state = {
-            (claim.claim_key or claim.claim_id, claim.supported, bool(set(claim.cited_alignment_ids) & expected))
+            (
+                claim.claim_key or claim.claim_id,
+                claim.supported,
+                bool(set(claim.cited_alignment_ids) & expected),
+            )
             for claim in p_ar.claims
         }
         claim_state_match = en_claim_state == ar_claim_state
@@ -464,8 +478,14 @@ def compute_temporal_accuracy(
         retrieved_set = set(pred.retrieved_alignment_ids[:5])
         expected_valid = all(
             any(
-                (provision.effective_from is None or case.as_of >= provision.effective_from)
-                and (provision.effective_until is None or case.as_of <= provision.effective_until)
+                (
+                    provision.effective_from is None
+                    or (case.as_of is not None and case.as_of >= provision.effective_from)
+                )
+                and (
+                    provision.effective_until is None
+                    or (case.as_of is not None and case.as_of <= provision.effective_until)
+                )
                 for provision in provision_by_alignment.get(alignment_id, [])
             )
             for alignment_id in expected_set
@@ -519,7 +539,6 @@ def compute_multi_hop_accuracy(
     cases: list[BenchmarkCase],
 ) -> DimensionScore:
     """Compute complete provision coverage for complex multi-hop scenarios."""
-    case_map = {c.case_id: c for c in cases}
     mh_cases = [c for c in cases if c.category == BenchmarkCategory.MULTI_HOP]
 
     if not mh_cases:
@@ -541,7 +560,10 @@ def compute_multi_hop_accuracy(
         score=score,
         sample_count=len(mh_cases),
         measured=True,
-        details={"full_coverage_count": full_coverage_count, "total_mh_cases": len(mh_cases)},
+        details={
+            "full_coverage_count": full_coverage_count,
+            "total_mh_cases": len(mh_cases),
+        },
     )
 
 
@@ -644,7 +666,9 @@ def _case_passed(
     cited = set(prediction.cited_alignment_ids)
     if valid_corpus_alignment_ids is not None and not cited <= valid_corpus_alignment_ids:
         return False
-    if case.expected_provisions and not set(case.expected_provisions) & set(prediction.retrieved_alignment_ids[:5]):
+    if case.expected_provisions and not set(case.expected_provisions) & set(
+        prediction.retrieved_alignment_ids[:5]
+    ):
         return False
     if case.category == BenchmarkCategory.CITATION_VERIFICATION:
         if not set(case.expected_provisions) & cited:
@@ -655,6 +679,9 @@ def _case_passed(
         if prediction.tool_arguments != case.expected_tool.arguments:
             return False
         if case.expected_tool.calculation and prediction.calculated_amount is not None:
-            if abs(prediction.calculated_amount - case.expected_tool.calculation.expected_amount) > case.expected_tool.calculation.tolerance:
+            if (
+                abs(prediction.calculated_amount - case.expected_tool.calculation.expected_amount)
+                > case.expected_tool.calculation.tolerance
+            ):
                 return False
     return True

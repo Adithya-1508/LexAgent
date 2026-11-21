@@ -72,6 +72,7 @@ class AgentState(BaseModel):
     verified_answer: GroundedLegalAnswer | None = None
 
     # Retry, Budgets & Limits
+    step_count: int = 0
     verification_attempts: int = 0
     max_attempts: int = Field(default=2, ge=1, le=10)
     max_steps: int = Field(default=20, ge=1, le=100)

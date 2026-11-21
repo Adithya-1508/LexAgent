@@ -14,7 +14,9 @@ def route_after_analysis(state: AgentState) -> Literal["abstain", "retrieve"]:
     return "retrieve"
 
 
-def route_after_retrieval(state: AgentState) -> Literal["tool", "synthesize", "abstain"]:
+def route_after_retrieval(
+    state: AgentState,
+) -> Literal["tool", "synthesize", "abstain"]:
     """Route to statutory tool execution if calculation intent present, otherwise directly to synthesis."""
     if state.current_status == AgentStatus.ABSTAINED:
         return "abstain"
@@ -37,7 +39,9 @@ def route_after_synthesis(state: AgentState) -> Literal["verify", "abstain"]:
     return "verify"
 
 
-def route_after_verification(state: AgentState) -> Literal["finalize", "reformulate", "abstain"]:
+def route_after_verification(
+    state: AgentState,
+) -> Literal["finalize", "reformulate", "abstain"]:
     """Route based on verification gate outcome and remaining retry budget."""
     if state.current_status == AgentStatus.VERIFIED:
         return "finalize"

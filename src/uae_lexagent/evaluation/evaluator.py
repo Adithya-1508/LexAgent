@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import re
 import time
-from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -14,7 +13,6 @@ from ..ingestion import load_provisions
 from ..models import (
     BenchmarkCase,
     EvaluationPrediction,
-    Jurisdiction,
     LegalProvision,
     LegalQuery,
     PredictedClaim,
@@ -181,30 +179,30 @@ class BenchmarkEvaluator:
         grounded_answer = self.synthesis_engine.synthesize(legal_query)
 
         # Extract retrieved alignment IDs
-        retrieved_alignment_ids: list[str] = []
+        retrieved_alignment_ids = []
         for ev in grounded_answer.referenced_evidence:
             align_id = ev.provision.alignment_id or ev.provision.provision_id
             if align_id not in retrieved_alignment_ids:
                 retrieved_alignment_ids.append(align_id)
 
         # Extract verified cited alignment IDs
-        cited_alignment_ids: list[str] = []
-        for c in grounded_answer.claims:
-            if c.verification_status == VerificationStatus.VERIFIED:
-                for cid in c.cited_alignment_ids:
+        cited_alignment_ids = []
+        for vc in grounded_answer.claims:
+            if vc.verification_status == VerificationStatus.VERIFIED:
+                for cid in vc.cited_alignment_ids:
                     if cid not in cited_alignment_ids:
                         cited_alignment_ids.append(cid)
 
         # Extract structured claims
-        predicted_claims: list[PredictedClaim] = [
+        predicted_claims = [
             PredictedClaim(
-                claim_id=c.claim_id,
-                claim_key=c.claim_key,
-                conclusion=c.conclusion,
-                cited_alignment_ids=c.cited_alignment_ids,
-                supported=(c.verification_status == VerificationStatus.VERIFIED),
+                claim_id=vc.claim_id,
+                claim_key=vc.claim_key,
+                conclusion=vc.conclusion,
+                cited_alignment_ids=vc.cited_alignment_ids,
+                supported=(vc.verification_status == VerificationStatus.VERIFIED),
             )
-            for c in grounded_answer.claims
+            for vc in grounded_answer.claims
         ]
 
         # Tool evaluation based on query intent
@@ -226,7 +224,10 @@ class BenchmarkEvaluator:
             tool_name = "calculate_gratuity"
             salary = Decimal(salary_match.group(1))
             years = Decimal(years_match.group(1))
-            tool_arguments = {"basic_salary": float(salary), "service_years": float(years)}
+            tool_arguments = {
+                "basic_salary": float(salary),
+                "service_years": float(years),
+            }
             try:
                 res = calculate_gratuity(salary, years)
                 calc_amount = Decimal(str(res["total_gratuity"]))
@@ -308,7 +309,9 @@ def run_evaluation(
     cab_provisions = load_provisions(data_dir / "cabinet_resolution_1_2022_provisions.json")
     all_provisions = fdl_provisions + cab_provisions
 
-    benchmark_path = benchmark_path if benchmark_path.is_absolute() else project_root / benchmark_path
+    benchmark_path = (
+        benchmark_path if benchmark_path.is_absolute() else project_root / benchmark_path
+    )
     cases = load_benchmark_cases(benchmark_path)
     manifest = load_benchmark_manifest(project_root / "data" / "evaluation" / "manifest.json")
     issues = validate_benchmark_manifest(
@@ -318,9 +321,14 @@ def run_evaluation(
         all_provisions,
         corpus_version=corpus_version,
     )
-    issues.extend(validate_benchmark_integrity(cases, all_provisions, corpus_version=corpus_version))
+    issues.extend(
+        validate_benchmark_integrity(cases, all_provisions, corpus_version=corpus_version)
+    )
     if issues:
-        raise ValueError(f"Benchmark integrity validation failed with {len(issues)} issues:\n" + "\n".join(issues))
+        raise ValueError(
+            f"Benchmark integrity validation failed with {len(issues)} issues:\n"
+            + "\n".join(issues)
+        )
 
     valid_alignment_ids = {p.alignment_id for p in all_provisions if p.alignment_id}
     generator = get_generator(generator_type=generator_type)
@@ -339,10 +347,14 @@ def run_evaluation(
             embedding_provider=embedder,
             corpus_version=corpus_version,
         )
-        reranker = SentenceTransformerReranker() if reranker_type_clean == "cross-encoder" else IdentityReranker()
-        retriever = HybridLegalRetriever(index=index, reranker=reranker)
+        reranker = (
+            SentenceTransformerReranker()
+            if reranker_type_clean == "cross-encoder"
+            else IdentityReranker()
+        )
+        hybrid_retriever = HybridLegalRetriever(index=index, reranker=reranker)
         evaluator = BenchmarkEvaluator(
-            retriever=retriever,
+            retriever=hybrid_retriever,
             valid_alignment_ids=valid_alignment_ids,
             retriever_name="hybrid",
             generator=generator,
@@ -367,9 +379,9 @@ def run_evaluation(
             },
         )
     else:
-        retriever = InMemoryRetriever(all_provisions)
+        baseline_retriever = InMemoryRetriever(all_provisions)
         evaluator = BenchmarkEvaluator(
-            retriever=retriever,
+            retriever=baseline_retriever,
             valid_alignment_ids=valid_alignment_ids,
             retriever_name="baseline",
             generator=generator,
@@ -410,17 +422,33 @@ def run_evaluation(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="UAE-LexAgent Benchmark Evaluator (Retrieval + Grounded Synthesis + Agent)")
-    parser.add_argument("--benchmark", type=Path, default=Path("data/evaluation/benchmark_queries.jsonl"))
+    parser = argparse.ArgumentParser(
+        description="UAE-LexAgent Benchmark Evaluator (Retrieval + Grounded Synthesis + Agent)"
+    )
+    parser.add_argument(
+        "--benchmark",
+        type=Path,
+        default=Path("data/evaluation/benchmark_queries.jsonl"),
+    )
     parser.add_argument("--output", type=Path, default=Path("reports/benchmark_results.json"))
     parser.add_argument("--report", type=Path, default=Path("reports/benchmark_report.md"))
     parser.add_argument("--retriever", choices=["baseline", "hybrid"], default="hybrid")
-    parser.add_argument("--embedding", choices=["hash", "sentence-transformer", "openai"], default="hash")
+    parser.add_argument(
+        "--embedding",
+        choices=["hash", "sentence-transformer", "openai"],
+        default="hash",
+    )
     parser.add_argument("--reranker", choices=["identity", "cross-encoder"], default="identity")
-    parser.add_argument("--generator", choices=["deterministic", "openai", "anthropic", "ollama", "vllm"], default="deterministic")
+    parser.add_argument(
+        "--generator",
+        choices=["deterministic", "openai", "anthropic", "ollama", "vllm"],
+        default="deterministic",
+    )
     parser.add_argument("--verification", choices=["strict", "permissive"], default="strict")
     parser.add_argument("--mode", choices=["baseline", "synthesis", "agent"], default="agent")
-    parser.add_argument("--runtime", choices=["deterministic", "langgraph"], default="deterministic")
+    parser.add_argument(
+        "--runtime", choices=["deterministic", "langgraph"], default="deterministic"
+    )
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--max-steps", type=int, default=20)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)

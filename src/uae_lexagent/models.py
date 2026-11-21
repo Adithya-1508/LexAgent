@@ -133,7 +133,9 @@ class LegalProvision(BaseModel):
         if self.language == "en" and self.is_authoritative:
             raise ValueError("English legal translations cannot be marked is_authoritative=True")
         if self.language == "en" and not self.translation_of:
-            raise ValueError("English legal translations must specify translation_of pointing to Arabic provision ID")
+            raise ValueError(
+                "English legal translations must specify translation_of pointing to Arabic provision ID"
+            )
         if (
             self.page_start is not None
             and self.page_end is not None
@@ -321,9 +323,13 @@ class BenchmarkCase(BaseModel):
     @model_validator(mode="after")
     def validate_case_consistency(self) -> "BenchmarkCase":
         if not self.expected_answerable and not self.abstention_reason:
-            raise ValueError(f"Case '{self.case_id}' is marked expected_answerable=False but lacks abstention_reason")
+            raise ValueError(
+                f"Case '{self.case_id}' is marked expected_answerable=False but lacks abstention_reason"
+            )
         if not self.expected_answerable and self.expected_provisions:
-            raise ValueError(f"Unanswerable case '{self.case_id}' cannot declare expected provisions")
+            raise ValueError(
+                f"Unanswerable case '{self.case_id}' cannot declare expected provisions"
+            )
         if self.category == BenchmarkCategory.TEMPORAL_VERSIONING and self.as_of is None:
             raise ValueError(f"Temporal case '{self.case_id}' must specify as_of date")
         if self.category == BenchmarkCategory.ADVERSARIAL and not self.adversarial_type:
@@ -332,7 +338,9 @@ class BenchmarkCase(BaseModel):
             raise ValueError(f"Code-switched case '{self.case_id}' must use language='mixed'")
         if self.category == BenchmarkCategory.TOOL_CALCULATION:
             if self.expected_tool is None or self.expected_tool.calculation is None:
-                raise ValueError(f"Tool-calculation case '{self.case_id}' requires expected calculation data")
+                raise ValueError(
+                    f"Tool-calculation case '{self.case_id}' requires expected calculation data"
+                )
         return self
 
 

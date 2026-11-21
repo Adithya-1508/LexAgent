@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from collections import Counter
 from pathlib import Path
 
-from ..models import BenchmarkCase, BenchmarkCategory, BenchmarkManifest, Language, LegalProvision
+from ..models import (
+    BenchmarkCase,
+    BenchmarkCategory,
+    BenchmarkManifest,
+    Language,
+    LegalProvision,
+)
 
 MIN_CATEGORY_COUNTS: dict[BenchmarkCategory, int] = {
     BenchmarkCategory.DIRECT_FACTUAL: 30,
@@ -49,7 +55,9 @@ def compute_corpus_fingerprint(provisions: list[LegalProvision]) -> str:
     """Compute a stable fingerprint from canonical provision records."""
     records = [provision.model_dump(mode="json") for provision in provisions]
     records.sort(key=lambda record: record["provision_id"])
-    payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -135,7 +143,9 @@ def validate_benchmark_integrity(
             if not case.abstention_reason:
                 issues.append(f"Unanswerable case '{case.case_id}' must specify abstention_reason")
             if case.expected_provisions:
-                issues.append(f"Unanswerable case '{case.case_id}' should not cite expected provisions")
+                issues.append(
+                    f"Unanswerable case '{case.case_id}' should not cite expected provisions"
+                )
 
         # 6. Category-specific requirements
         if case.category == BenchmarkCategory.TEMPORAL_VERSIONING and case.as_of is None:
@@ -164,7 +174,9 @@ def validate_benchmark_integrity(
 
         c_en, c_ar = en_cases[0], ar_cases[0]
         if c_en.category != c_ar.category:
-            issues.append(f"Bilingual pair '{pair_id}' category mismatch: {c_en.category} vs {c_ar.category}")
+            issues.append(
+                f"Bilingual pair '{pair_id}' category mismatch: {c_en.category} vs {c_ar.category}"
+            )
         if c_en.expected_jurisdiction != c_ar.expected_jurisdiction:
             issues.append(f"Bilingual pair '{pair_id}' jurisdiction mismatch")
         if c_en.expected_answerable != c_ar.expected_answerable:
@@ -175,7 +187,9 @@ def validate_benchmark_integrity(
             issues.append(f"Bilingual pair '{pair_id}' as_of date mismatch")
         if c_en.expected_corpus_version != c_ar.expected_corpus_version:
             issues.append(f"Bilingual pair '{pair_id}' corpus-version mismatch")
-        if {claim.claim_id for claim in c_en.expected_claims} != {claim.claim_id for claim in c_ar.expected_claims}:
+        if {claim.claim_id for claim in c_en.expected_claims} != {
+            claim.claim_id for claim in c_ar.expected_claims
+        }:
             issues.append(f"Bilingual pair '{pair_id}' claim-id mismatch")
         if (c_en.expected_tool is None) != (c_ar.expected_tool is None):
             issues.append(f"Bilingual pair '{pair_id}' tool expectation mismatch")
@@ -191,6 +205,8 @@ def validate_benchmark_integrity(
     for cat, min_count in MIN_CATEGORY_COUNTS.items():
         actual_count = category_counts.get(cat, 0)
         if actual_count < min_count:
-            issues.append(f"Category '{cat.value}' has {actual_count} cases, minimum required is {min_count}")
+            issues.append(
+                f"Category '{cat.value}' has {actual_count} cases, minimum required is {min_count}"
+            )
 
     return issues

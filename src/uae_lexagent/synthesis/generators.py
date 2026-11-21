@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
-from hashlib import sha256
 from decimal import Decimal
-from typing import Any, Protocol, Sequence
+from hashlib import sha256
+from typing import Any, Protocol
 
 from ..models import Jurisdiction, Language, LegalEvidence, LegalQuery, ToolCall
 from .contracts import (
@@ -65,7 +64,7 @@ class DeterministicTemplateGenerator:
         # 2. Build template claims from query & evidence
         claims: list[DraftLegalClaim] = []
         query_cf = query.text.casefold()
-        is_arabic = (language == Language.AR)
+        is_arabic = language == Language.AR
 
         # Evidence alignment lookup
         evidence_by_align: dict[str, LegalEvidence] = {}
@@ -110,50 +109,73 @@ class DeterministicTemplateGenerator:
         if (
             any(w in query_cf for w in ("probation", "تجربة"))
             and any(w in query_cf for w in ("employer", "صاحب العمل"))
-            and any(w in query_cf for w in ("terminate", "notice", "إنهاء", "اخطار", "إخطار", "فصل"))
-            and not any(w in query_cf for w in ("another employer", "new employer", "move to", "join another"))
+            and any(
+                w in query_cf for w in ("terminate", "notice", "إنهاء", "اخطار", "إخطار", "فصل")
+            )
+            and not any(
+                w in query_cf
+                for w in ("another employer", "new employer", "move to", "join another")
+            )
         ):
             align_id = "FDL_33_2021_A9_C1"
             if has_evidence(align_id):
                 claims.append(
-                DraftLegalClaim(
-                    claim_id=claim_id("probation_employer_notice_days"),
-                    claim_key="probation_employer_notice_days",
-                    conclusion=(
-                        "يجوز لصاحب العمل إنهاء خدمة العامل خلال فترة التجربة بإخطار خطي مدته لا تقل عن (14) يوماً."
-                        if is_arabic
-                        else "The employer may terminate the worker's service during probation by giving at least 14 days prior written notice."
-                    ),
-                    cited_alignment_ids=[align_id],
-                    confidence=Decimal("1.0"),
-                )
+                    DraftLegalClaim(
+                        claim_id=claim_id("probation_employer_notice_days"),
+                        claim_key="probation_employer_notice_days",
+                        conclusion=(
+                            "يجوز لصاحب العمل إنهاء خدمة العامل خلال فترة التجربة بإخطار خطي مدته لا تقل عن (14) يوماً."
+                            if is_arabic
+                            else "The employer may terminate the worker's service during probation by giving at least 14 days prior written notice."
+                        ),
+                        cited_alignment_ids=[align_id],
+                        confidence=Decimal("1.0"),
+                    )
                 )
 
         # Article 9 Clause 3: Employee Transfer Notice (30 days) & Recruitment Costs
-        if (
-            any(w in query_cf for w in ("probation", "تجربة"))
-            and any(w in query_cf for w in ("transfer", "another employer", "move", "صاحب عمل آخر", "الانتقال"))
+        if any(w in query_cf for w in ("probation", "تجربة")) and any(
+            w in query_cf
+            for w in (
+                "transfer",
+                "another employer",
+                "move",
+                "صاحب عمل آخر",
+                "الانتقال",
+            )
         ):
             align_id = "FDL_33_2021_A9_C3"
             if has_evidence(align_id):
                 claims.append(
-                DraftLegalClaim(
-                    claim_id=claim_id("probation_employee_transfer_notice_months"),
-                    claim_key="probation_employee_transfer_notice_months",
-                    conclusion=(
-                        "يلتزم العامل الذي يرغب بالانتقال لصاحب عمل آخر بإخطار صاحب العمل خطياً بمدة لا تقل عن شهر، مع تعويض تكاليف الاستقدام."
-                        if is_arabic
-                        else "A worker wishing to transfer to another UAE employer during probation must give at least one month prior written notice, and the new employer must compensate recruitment costs."
-                    ),
-                    cited_alignment_ids=[align_id],
-                    confidence=Decimal("1.0"),
-                )
+                    DraftLegalClaim(
+                        claim_id=claim_id("probation_employee_transfer_notice_months"),
+                        claim_key="probation_employee_transfer_notice_months",
+                        conclusion=(
+                            "يلتزم العامل الذي يرغب بالانتقال لصاحب عمل آخر بإخطار صاحب العمل خطياً بمدة لا تقل عن شهر، مع تعويض تكاليف الاستقدام."
+                            if is_arabic
+                            else "A worker wishing to transfer to another UAE employer during probation must give at least one month prior written notice, and the new employer must compensate recruitment costs."
+                        ),
+                        cited_alignment_ids=[align_id],
+                        confidence=Decimal("1.0"),
+                    )
                 )
 
         # Article 9 Clause 2: Successful completion and service credit
         if (
             any(w in query_cf for w in ("probation", "تجربة", "اختبار"))
-            and any(w in query_cf for w in ("success", "complete", "continue", "service", "نجاح", "أتم", "استمر", "خدمة"))
+            and any(
+                w in query_cf
+                for w in (
+                    "success",
+                    "complete",
+                    "continue",
+                    "service",
+                    "نجاح",
+                    "أتم",
+                    "استمر",
+                    "خدمة",
+                )
+            )
             and has_evidence("FDL_33_2021_A9_C2")
         ):
             claims.append(
@@ -171,24 +193,30 @@ class DeterministicTemplateGenerator:
             )
 
         # Article 9 Clause 4: Employee Departure Notice (14 days)
-        if (
-            any(w in query_cf for w in ("probation", "تجربة"))
-            and any(w in query_cf for w in ("leave the country", "leave the state", "resignation", "مغادرة الدولة", "السفر"))
+        if any(w in query_cf for w in ("probation", "تجربة")) and any(
+            w in query_cf
+            for w in (
+                "leave the country",
+                "leave the state",
+                "resignation",
+                "مغادرة الدولة",
+                "السفر",
+            )
         ):
             align_id = "FDL_33_2021_A9_C4"
             if has_evidence(align_id):
                 claims.append(
-                DraftLegalClaim(
-                    claim_id=claim_id("probation_employee_departure_notice_days"),
-                    claim_key="probation_employee_departure_notice_days",
-                    conclusion=(
-                        "يلتزم العامل الأجنبي الراغب بمغادرة الدولة خلال فترة التجربة بإخطار صاحب العمل خطياً بمدة لا تقل عن (14) يوماً."
-                        if is_arabic
-                        else "A foreign worker wishing to leave the UAE during probation must provide at least 14 days prior written notice."
-                    ),
-                    cited_alignment_ids=[align_id],
-                    confidence=Decimal("1.0"),
-                )
+                    DraftLegalClaim(
+                        claim_id=claim_id("probation_employee_departure_notice_days"),
+                        claim_key="probation_employee_departure_notice_days",
+                        conclusion=(
+                            "يلتزم العامل الأجنبي الراغب بمغادرة الدولة خلال فترة التجربة بإخطار صاحب العمل خطياً بمدة لا تقل عن (14) يوماً."
+                            if is_arabic
+                            else "A foreign worker wishing to leave the UAE during probation must provide at least 14 days prior written notice."
+                        ),
+                        cited_alignment_ids=[align_id],
+                        confidence=Decimal("1.0"),
+                    )
                 )
 
         # Article 10 / Cabinet Res 1 2022 Article 12: Non-Compete Max Duration (2 years)
@@ -196,35 +224,44 @@ class DeterministicTemplateGenerator:
             align_id = "FDL_33_2021_A10_C1"
             if has_evidence(align_id):
                 claims.append(
-                DraftLegalClaim(
-                    claim_id=claim_id("non_compete_max_years"),
-                    claim_key="non_compete_max_years",
-                    conclusion=(
-                        "يشترط في شرط عدم المنافسة تحديد المكان والزمان ونوع العمل، على ألا تزيد المدة على سنتين من تاريخ انتهاء العقد."
-                        if is_arabic
-                        else "A non-compete clause must specify time, geographical scope, and nature of work, with duration not exceeding 2 years."
-                    ),
-                    cited_alignment_ids=[align_id],
-                    confidence=Decimal("1.0"),
-                )
+                    DraftLegalClaim(
+                        claim_id=claim_id("non_compete_max_years"),
+                        claim_key="non_compete_max_years",
+                        conclusion=(
+                            "يشترط في شرط عدم المنافسة تحديد المكان والزمان ونوع العمل، على ألا تزيد المدة على سنتين من تاريخ انتهاء العقد."
+                            if is_arabic
+                            else "A non-compete clause must specify time, geographical scope, and nature of work, with duration not exceeding 2 years."
+                        ),
+                        cited_alignment_ids=[align_id],
+                        confidence=Decimal("1.0"),
+                    )
                 )
 
         # Article 51: Gratuity Rules
-        if any(w in query_cf for w in ("gratuity", "end of service", "severance", "مكافأة نهاية الخدمة", "مكافاة نهاية الخدمة")):
+        if any(
+            w in query_cf
+            for w in (
+                "gratuity",
+                "end of service",
+                "severance",
+                "مكافأة نهاية الخدمة",
+                "مكافاة نهاية الخدمة",
+            )
+        ):
             align_ids = ["FDL_33_2021_A51_C2", "FDL_33_2021_A51_C6"]
             if has_evidence(*align_ids):
                 claims.append(
-                DraftLegalClaim(
-                    claim_id=claim_id("gratuity_calculation"),
-                    claim_key="gratuity_calculation",
-                    conclusion=(
-                        "يستحق العامل مكافأة نهاية الخدمة بواقع (21) يوماً عن كل سنة من السنوات الخمس الأولى، و(30) يوماً عن كل سنة تالية، بحد أقصى سنتين."
-                        if is_arabic
-                        else "End-of-service gratuity is calculated at 21 days basic salary per year for the first 5 years, and 30 days per year thereafter, capped at 2 years' basic salary."
-                    ),
-                    cited_alignment_ids=align_ids,
-                    confidence=Decimal("1.0"),
-                )
+                    DraftLegalClaim(
+                        claim_id=claim_id("gratuity_calculation"),
+                        claim_key="gratuity_calculation",
+                        conclusion=(
+                            "يستحق العامل مكافأة نهاية الخدمة بواقع (21) يوماً عن كل سنة من السنوات الخمس الأولى، و(30) يوماً عن كل سنة تالية، بحد أقصى سنتين."
+                            if is_arabic
+                            else "End-of-service gratuity is calculated at 21 days basic salary per year for the first 5 years, and 30 days per year thereafter, capped at 2 years' basic salary."
+                        ),
+                        cited_alignment_ids=align_ids,
+                        confidence=Decimal("1.0"),
+                    )
                 )
 
         # Bind validated tool calculations into claims when present
@@ -361,14 +398,21 @@ Respond in valid JSON format matching this schema:
                 raise ValueError("Provider response has invalid answerability or summary fields")
             claims = [
                 DraftLegalClaim(
-                    claim_id=_stable_id("claim", query.query_id, str(c.get("claim_key", "")), str(i)),
+                    claim_id=_stable_id(
+                        "claim", query.query_id, str(c.get("claim_key", "")), str(i)
+                    ),
                     claim_key=c.get("claim_key", ""),
                     conclusion=c["conclusion"],
                     cited_alignment_ids=c.get("cited_alignment_ids", []),
                     confidence=Decimal("0.9"),
                     tool_derived=(
                         c.get("claim_key") == "gratuity_calculation"
-                        and any(call.tool_name == "calculate_gratuity" and call.valid_schema and call.result for call in (tool_calls or []))
+                        and any(
+                            call.tool_name == "calculate_gratuity"
+                            and call.valid_schema
+                            and call.result
+                            for call in (tool_calls or [])
+                        )
                     ),
                 )
                 for i, c in enumerate(parsed.get("claims", []), start=1)
@@ -440,7 +484,11 @@ def get_generator(generator_type: str = "deterministic", **kwargs: Any) -> Gener
                     return resp.choices[0].message.content or "{}"
 
             default_model = "gpt-4o" if gen_clean == "openai" else "facebook/opt-125m"
-            default_url = None if gen_clean == "openai" else kwargs.get("base_url", "http://localhost:8000/v1")
+            default_url = (
+                None
+                if gen_clean == "openai"
+                else kwargs.get("base_url", "http://localhost:8000/v1")
+            )
             return LLMGenerator(
                 provider=_OpenAIProvider(kwargs.get("model", default_model), default_url),
                 model_name=gen_clean,
@@ -453,7 +501,9 @@ def get_generator(generator_type: str = "deterministic", **kwargs: Any) -> Gener
 
             class _AnthropicProvider:
                 def __init__(self, model: str) -> None:
-                    self.client = anthropic.Anthropic(api_key=kwargs.get("api_key") or os.getenv("ANTHROPIC_API_KEY"))
+                    self.client = anthropic.Anthropic(
+                        api_key=kwargs.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
+                    )
                     self.model = model
 
                 def complete(self, prompt: str, *, timeout_seconds: float = 30.0) -> str:
@@ -486,7 +536,10 @@ def get_generator(generator_type: str = "deterministic", **kwargs: Any) -> Gener
                     )
                     return response.get("message", {}).get("content", "{}")
 
-            return LLMGenerator(provider=_OllamaProvider(kwargs.get("model", "llama3.1")), model_name="ollama")
+            return LLMGenerator(
+                provider=_OllamaProvider(kwargs.get("model", "llama3.1")),
+                model_name="ollama",
+            )
         except ImportError as exc:
             raise ImportError("ollama package required for Ollama generator") from exc
     else:

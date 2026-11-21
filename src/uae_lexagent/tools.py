@@ -6,7 +6,8 @@ versioned, verified provision before it is used in a production answer.
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +24,10 @@ class GratuityPolicy(BaseModel):
 
 class GratuityInput(BaseModel):
     basic_salary: Decimal = Field(gt=0)
-    service_years: Decimal = Field(ge=0)
+    service_years: Decimal = Field(ge=0, le=60)
+    work_pattern: Literal["full_time", "part_time"] = "full_time"
+    is_uae_national: bool = False
+    unpaid_absence_days: Decimal = Field(default=Decimal("0"), ge=0)
 
 
 class GratuityResult(BaseModel):
@@ -32,6 +36,18 @@ class GratuityResult(BaseModel):
     policy_id: str
     calculation_basis: str
     legal_basis: str
+
+
+class GratuityCalculationResult(BaseModel):
+    basic_salary: float
+    service_years: float
+    total_gratuity: float
+    currency: str = "AED"
+    statutory_basis: str
+    eligibility_status: Literal[
+        "eligible", "ineligible_under_one_year", "ineligible_pension_applicable"
+    ]
+    note: str | None = None
 
 
 def calculate_end_of_service_gratuity(
@@ -63,10 +79,23 @@ def calculate_end_of_service_gratuity(
 def calculate_gratuity(
     basic_salary: float | Decimal,
     service_years: float | Decimal,
+    is_uae_national: bool = False,
+    work_pattern: str = "full_time",
 ) -> dict[str, Any]:
     """Calculate UAE statutory gratuity under Federal Decree-Law No. 33 of 2021 Article 51."""
     salary = Decimal(str(basic_salary))
     years = Decimal(str(service_years))
+
+    if is_uae_national:
+        return {
+            "basic_salary": float(salary),
+            "service_years": float(years),
+            "total_gratuity": 0.0,
+            "currency": "AED",
+            "statutory_basis": "FDL_33_2021_A51_C1",
+            "eligibility_status": "ineligible_pension_applicable",
+            "note": "UAE national workers are covered under the Federal Pension and Social Security Law rather than end-of-service gratuity.",
+        }
 
     if years < Decimal("1.0"):
         return {
@@ -75,6 +104,8 @@ def calculate_gratuity(
             "total_gratuity": 0.0,
             "currency": "AED",
             "statutory_basis": "FDL_33_2021_A51_C2",
+            "eligibility_status": "ineligible_under_one_year",
+            "note": "A worker who has completed less than 1 year of continuous service is not entitled to end-of-service gratuity.",
         }
 
     daily_wage = salary / Decimal("30")
@@ -84,7 +115,9 @@ def calculate_gratuity(
     additional_years = max(Decimal("0.0"), years - Decimal("5.0"))
     gratuity_additional = daily_wage * Decimal("30") * additional_years
 
-    total = (gratuity_first_5 + gratuity_additional).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total = (gratuity_first_5 + gratuity_additional).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
     max_cap = salary * Decimal("24")  # 2 years total basic salary cap
 
     final_amount = min(total, max_cap)
@@ -95,4 +128,6 @@ def calculate_gratuity(
         "total_gratuity": float(final_amount),
         "currency": "AED",
         "statutory_basis": "FDL_33_2021_A51_C2",
+        "eligibility_status": "eligible",
+        "note": "Calculated under Article 51(2) with 2-year basic wage ceiling under Article 51(3).",
     }

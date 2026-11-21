@@ -1,3 +1,4 @@
+from .agent import LegalAgentOrchestrator
 from .ingestion import (
     is_valid_official_url,
     load_document_metadata,
@@ -10,19 +11,17 @@ from .ingestion import (
     validate_temporal_consistency,
 )
 from .models import (
-    Jurisdiction,
-    Language,
     BenchmarkCase,
     BenchmarkManifest,
-    PredictedClaim,
+    Jurisdiction,
+    Language,
     LegalDocument,
     LegalEvidence,
     LegalProvision,
     LegalQuery,
     LegalSource,
+    PredictedClaim,
 )
-
-from .agent import LegalAgentOrchestrator
 
 __all__ = [
     "Jurisdiction",

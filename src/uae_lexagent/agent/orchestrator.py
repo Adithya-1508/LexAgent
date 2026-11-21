@@ -43,7 +43,9 @@ class LegalAgentOrchestrator:
         self.generator = generator or DeterministicTemplateGenerator()
 
         valid_alignments = {p.alignment_id for p in self.provisions if p.alignment_id}
-        self.verifier = verifier or CitationVerifier(valid_corpus_alignment_ids=valid_alignments, strict=True)
+        self.verifier = verifier or CitationVerifier(
+            valid_corpus_alignment_ids=valid_alignments, strict=True
+        )
 
         self.runtime = runtime
         if self.runtime not in {"deterministic", "langgraph"}:

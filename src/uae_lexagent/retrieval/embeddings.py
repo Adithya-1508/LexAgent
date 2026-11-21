@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
 
 
 class EmbeddingProvider(Protocol):
@@ -76,13 +76,14 @@ class SentenceTransformerEmbedding:
 
     def __init__(self, model_id: str = "BAAI/bge-m3") -> None:
         self._model_id = model_id
-        self._model = None
+        self._model: Any = None
         self._dimension: int | None = None
 
     def _load(self) -> None:
         if self._model is None:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._model = SentenceTransformer(self._model_id)
                 self._dimension = self._model.get_sentence_embedding_dimension()
             except ImportError as exc:
@@ -114,7 +115,9 @@ class OpenAIEmbedding:
         "text-embedding-3-large": 3072,
     }
 
-    def __init__(self, model_id: str = "text-embedding-3-small", dimension: int | None = None) -> None:
+    def __init__(
+        self, model_id: str = "text-embedding-3-small", dimension: int | None = None
+    ) -> None:
         resolved_dimension = dimension or self._MODEL_DIMENSIONS.get(model_id)
         if resolved_dimension is None or resolved_dimension <= 0:
             raise ValueError(
@@ -122,15 +125,18 @@ class OpenAIEmbedding:
             )
         self._model_id = model_id
         self._dimension = resolved_dimension
-        self._client = None
+        self._client: Any = None
 
     def _load(self) -> None:
         if self._client is None:
             try:
                 import openai
+
                 self._client = openai.OpenAI()
             except ImportError as exc:
-                raise ImportError("openai is not installed. Install with `pip install openai`") from exc
+                raise ImportError(
+                    "openai is not installed. Install with `pip install openai`"
+                ) from exc
 
     @property
     def dimension(self) -> int:

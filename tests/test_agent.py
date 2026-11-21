@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -15,9 +14,7 @@ from uae_lexagent.agent import (
     AgentState,
     AgentStatus,
     AgentTraceStep,
-    DeterministicAgentGraph,
     LegalAgentOrchestrator,
-    build_langgraph_agent,
 )
 from uae_lexagent.agent.nodes import (
     abstain_node,
@@ -32,8 +29,6 @@ from uae_lexagent.agent.nodes import (
 from uae_lexagent.agent.router import (
     route_after_analysis,
     route_after_reformulation,
-    route_after_retrieval,
-    route_after_tool,
     route_after_verification,
 )
 from uae_lexagent.evaluation.evaluator import BenchmarkEvaluator
@@ -47,7 +42,6 @@ from uae_lexagent.models import (
     LegalProvision,
     LegalQuery,
     LegalResponse,
-    ToolCall,
 )
 from uae_lexagent.retrieval import InMemoryRetriever
 from uae_lexagent.synthesis.contracts import (
@@ -59,8 +53,7 @@ from uae_lexagent.synthesis.contracts import (
 )
 from uae_lexagent.synthesis.generators import DeterministicTemplateGenerator
 from uae_lexagent.synthesis.verifier import CitationVerifier
-from uae_lexagent.tools import GratuityInput, calculate_gratuity
-
+from uae_lexagent.tools import GratuityInput
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
@@ -68,7 +61,9 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 @pytest.fixture(scope="module")
 def canonical_provisions() -> list[LegalProvision]:
     fdl = load_provisions(DATA_DIR / "official_sources" / "fdl_33_2021_provisions.json")
-    cab = load_provisions(DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json")
+    cab = load_provisions(
+        DATA_DIR / "official_sources" / "cabinet_resolution_1_2022_provisions.json"
+    )
     return fdl + cab
 
 
@@ -179,16 +174,23 @@ def test_multi_hop_decomposition(canonical_provisions: list[LegalProvision]) -> 
 
 
 # 5. Arabic and mixed-language routing
-def test_arabic_and_mixed_language_routing(canonical_provisions: list[LegalProvision]) -> None:
+def test_arabic_and_mixed_language_routing(
+    canonical_provisions: list[LegalProvision],
+) -> None:
     # Arabic query
-    ar_query = LegalQuery(query_id="Q_AR_001", text="ما هي أقصى فترة تجربة في قانون العمل الإماراتي؟")
+    ar_query = LegalQuery(
+        query_id="Q_AR_001", text="ما هي أقصى فترة تجربة في قانون العمل الإماراتي؟"
+    )
     ar_state = AgentState(query=ar_query)
     ar_state = analyze_node(ar_state, canonical_provisions)
     assert ar_state.language == Language.AR
     assert ar_state.output_language == "ar"
 
     # Mixed code-switched query
-    mixed_query = LegalQuery(query_id="Q_MIX_001", text="كم notice period المطلوبة during probation في الإمارات؟")
+    mixed_query = LegalQuery(
+        query_id="Q_MIX_001",
+        text="كم notice period المطلوبة during probation في الإمارات؟",
+    )
     mixed_state = AgentState(query=mixed_query)
     mixed_state = analyze_node(mixed_state, canonical_provisions)
     assert mixed_state.language == Language.MIXED
@@ -196,7 +198,9 @@ def test_arabic_and_mixed_language_routing(canonical_provisions: list[LegalProvi
 
 
 # 6. Unknown jurisdiction abstention
-def test_unknown_jurisdiction_abstention(canonical_provisions: list[LegalProvision]) -> None:
+def test_unknown_jurisdiction_abstention(
+    canonical_provisions: list[LegalProvision],
+) -> None:
     query = LegalQuery(
         query_id="Q_UNK_JURIS",
         text="Under Singapore employment law, what is the statutory notice period?",
@@ -212,13 +216,19 @@ def test_unknown_jurisdiction_abstention(canonical_provisions: list[LegalProvisi
 # 7. DIFC and ADGM abstention
 def test_difc_and_adgm_abstention(canonical_provisions: list[LegalProvision]) -> None:
     # DIFC
-    difc_query = LegalQuery(query_id="Q_DIFC", text="Under DIFC Employment Law, what are the end of service benefits?")
+    difc_query = LegalQuery(
+        query_id="Q_DIFC",
+        text="Under DIFC Employment Law, what are the end of service benefits?",
+    )
     difc_state = analyze_node(AgentState(query=difc_query), canonical_provisions)
     assert difc_state.current_status == AgentStatus.ABSTAINED
     assert route_after_analysis(difc_state) == "abstain"
 
     # ADGM
-    adgm_query = LegalQuery(query_id="Q_ADGM", text="What is the probation period in ADGM financial free zone?")
+    adgm_query = LegalQuery(
+        query_id="Q_ADGM",
+        text="What is the probation period in ADGM financial free zone?",
+    )
     adgm_state = analyze_node(AgentState(query=adgm_query), canonical_provisions)
     assert adgm_state.current_status == AgentStatus.ABSTAINED
     assert route_after_analysis(adgm_state) == "abstain"
@@ -239,7 +249,9 @@ def test_missing_article_abstention(canonical_provisions: list[LegalProvision]) 
 
 
 # 9. Historical corpus-gap abstention
-def test_historical_corpus_gap_abstention(canonical_provisions: list[LegalProvision]) -> None:
+def test_historical_corpus_gap_abstention(
+    canonical_provisions: list[LegalProvision],
+) -> None:
     query = LegalQuery(
         query_id="Q_HISTORICAL",
         text="What was the maternity leave in Dubai in 1995 under Law No. 8 of 1980?",
@@ -249,7 +261,10 @@ def test_historical_corpus_gap_abstention(canonical_provisions: list[LegalProvis
     state = analyze_node(state, canonical_provisions)
 
     assert state.current_status == AgentStatus.ABSTAINED
-    assert state.abstention_reason in ("historical_corpus_gap", "out_of_scope_worker_category")
+    assert state.abstention_reason in (
+        "historical_corpus_gap",
+        "out_of_scope_worker_category",
+    )
     assert route_after_analysis(state) == "abstain"
 
 
@@ -337,7 +352,10 @@ def test_tool_result_binding_into_synthesis(
         text="Calculate gratuity for basic salary AED 10000 and 2.0 years of service under UAE Labour Law.",
     )
     gen = DeterministicTemplateGenerator()
-    state = AgentState(query=query, sub_queries=["Under UAE Labour Law Article 51 gratuity calculation"])
+    state = AgentState(
+        query=query,
+        sub_queries=["Under UAE Labour Law Article 51 gratuity calculation"],
+    )
     state = retrieval_node(state, retriever, canonical_provisions)
     state = tool_node(state)
     assert len(state.tool_calls) == 1
@@ -488,7 +506,9 @@ def test_contradiction_causing_immediate_abstention(
 
 
 # 19. Retry for recoverable missing evidence
-def test_retry_for_recoverable_missing_evidence(canonical_provisions: list[LegalProvision]) -> None:
+def test_retry_for_recoverable_missing_evidence(
+    canonical_provisions: list[LegalProvision],
+) -> None:
     query = LegalQuery(query_id="Q_RETRY_REC", text="Recoverable query")
     # Claim cites Article 10 which is in the canonical corpus, but wasn't retrieved initially
     unverified_claim = VerifiedLegalClaim(
@@ -526,7 +546,11 @@ def test_retry_for_recoverable_missing_evidence(canonical_provisions: list[Legal
 # 20. No retry for contradictions
 def test_no_retry_for_contradictions() -> None:
     query = LegalQuery(query_id="Q_NO_RETRY", text="Contradictory query")
-    state = AgentState(query=query, current_status=AgentStatus.ABSTAINED, abstention_reason="contradictory_evidence")
+    state = AgentState(
+        query=query,
+        current_status=AgentStatus.ABSTAINED,
+        abstention_reason="contradictory_evidence",
+    )
     action = route_after_verification(state)
     assert action == "abstain"
 
@@ -564,7 +588,9 @@ def test_maximum_graph_step_enforcement(
 
 
 # 23. No duplicate reformulations
-def test_no_duplicate_reformulations(canonical_provisions: list[LegalProvision]) -> None:
+def test_no_duplicate_reformulations(
+    canonical_provisions: list[LegalProvision],
+) -> None:
     query = LegalQuery(query_id="Q_NO_DUP", text="Duplicate reformulation query")
     unverified_claim = VerifiedLegalClaim(
         claim_id="c_unv",
@@ -832,3 +858,160 @@ def test_agent_trace_respects_step_budget(
     assert response.answerable is False
     assert len(response.trace) <= 1
     assert response.fallback_reason == "exhausted_budget"
+
+
+def test_tool_calculation_contradiction_overwrites_full_text(
+    retriever: InMemoryRetriever,
+    canonical_provisions: list[LegalProvision],
+) -> None:
+    """When a calculated claim's number contradicts validated tool output, full_text must be overwritten with an abstention notice."""
+    verifier = CitationVerifier(
+        valid_corpus_alignment_ids={p.alignment_id for p in canonical_provisions if p.alignment_id}
+    )
+    query = LegalQuery(
+        query_id="Q_TOOL_CONTRA",
+        text="Under UAE Labour Law, calculate gratuity for 10000 salary and 3 years",
+    )
+    prov = next(p for p in canonical_provisions if p.alignment_id == "FDL_33_2021_A51_C2")
+    evidence = [LegalEvidence(evidence_id="ev_a51", provision=prov, retrieval_rank=1)]
+
+    # Tool calculated 21000, but draft claims 99999
+    draft_claim = DraftLegalClaim(
+        claim_id="c_gratuity_bad",
+        claim_key="gratuity_calculation",
+        conclusion="Under Article 51, the statutory end-of-service gratuity is AED 99999.00 for basic salary AED 10000.00 and 3.0 years of service.",
+        cited_alignment_ids=["FDL_33_2021_A51_C2"],
+        tool_derived=True,
+    )
+    draft = GeneratedLegalAnswer(
+        answer_id="ans_contra_tool",
+        query=query,
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+        answerable=True,
+        summary="Gratuity calculation",
+        claims=[draft_claim],
+        full_text=draft_claim.conclusion,
+        referenced_evidence=evidence,
+    )
+
+    state = AgentState(
+        query=query,
+        draft_answer=draft,
+        retrieved_evidence=evidence,
+        tool_results={
+            "basic_salary": 10000.0,
+            "service_years": 3.0,
+            "total_gratuity": 21000.0,
+        },
+    )
+    state = verification_node(state, verifier)
+
+    assert state.verified_answer is not None
+    assert state.verified_answer.answerable is False
+    assert state.verified_answer.verification_status == VerificationStatus.CONTRADICTED
+    assert "**Abstention Notice**" in state.verified_answer.full_text
+    assert "99999" not in state.verified_answer.full_text
+
+
+def test_unverified_answer_never_leaks_unsupported_text() -> None:
+    """Finalize node must never leak draft text if answer is unverified or contradicted."""
+    query = LegalQuery(query_id="Q_LEAK_CHECK", text="Sample query")
+    unv_answer = GroundedLegalAnswer(
+        answer_id="ans_unv",
+        query=query,
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+        answerable=False,
+        verification_status=VerificationStatus.UNVERIFIED,
+        summary="Unverified draft summary",
+        claims=[
+            VerifiedLegalClaim(
+                claim_id="c_unv",
+                claim_key="probation_max_months",
+                conclusion="Unverified assertion of legal right.",
+                cited_alignment_ids=["FDL_33_2021_A9_C1"],
+                verification_status=VerificationStatus.UNVERIFIED,
+                verification_reasons=["Citation not in retrieved evidence."],
+                support_score=0.0,
+            )
+        ],
+        full_text="Unverified assertion of legal right. [FDL_33_2021_A9_C1]",
+        referenced_evidence=[],
+        abstention_reason="unverified_claim",
+    )
+
+    state = AgentState(query=query, verified_answer=unv_answer)
+    response = finalize_node(state)
+
+    assert response.answerable is False
+    assert response.answer.startswith("**Abstention Notice**")
+    assert "Unverified assertion of legal right" not in response.answer
+    assert all(c.supported is False for c in response.claims)
+
+
+def test_error_sanitization_masks_internal_exception_details(
+    retriever: InMemoryRetriever,
+    canonical_provisions: list[LegalProvision],
+) -> None:
+    """Exception strings containing sensitive internal details must be sanitized to error type names."""
+
+    class LeakyGenerator:
+        def generate(self, *args, **kwargs):
+            raise ConnectionError(
+                "Host https://admin:SECRET_TOKEN@internal.cluster.local:8080 timed out"
+            )
+
+    orchestrator = LegalAgentOrchestrator(
+        retriever=retriever,
+        provisions=canonical_provisions,
+        generator=LeakyGenerator(),  # type: ignore
+    )
+
+    resp = orchestrator.run("Under UAE Labour Law, what is the probation period?")
+    assert resp.answerable is False
+    assert resp.fallback_reason == "provider_failure"
+
+    # Confirm secrets/hostnames are never leaked into response issues or trace
+    for issue in resp.verification.issues:
+        assert "SECRET_TOKEN" not in issue
+        assert "internal.cluster.local" not in issue
+    for step in resp.trace:
+        assert "SECRET_TOKEN" not in step.rationale
+        assert "internal.cluster.local" not in step.rationale
+
+
+def test_expanded_alignment_keys_verify_article_53_and_66(
+    canonical_provisions: list[LegalProvision],
+) -> None:
+    """Articles 53 and 66 must have valid alignment keys in CitationVerifier."""
+    valid_ids = {p.alignment_id for p in canonical_provisions if p.alignment_id}
+    verifier = CitationVerifier(valid_corpus_alignment_ids=valid_ids, strict=True)
+    query = LegalQuery(
+        query_id="Q_A53", text="Within how many days must employer pay entitlements?"
+    )
+
+    prov_53 = next(p for p in canonical_provisions if p.alignment_id == "FDL_33_2021_A53_C1")
+    ev_53 = [LegalEvidence(evidence_id="ev_53", provision=prov_53, retrieval_rank=1)]
+
+    draft = GeneratedLegalAnswer(
+        answer_id="ans_53",
+        query=query,
+        jurisdiction=Jurisdiction.UAE_ONSHORE,
+        answerable=True,
+        summary="Entitlement timeline",
+        claims=[
+            DraftLegalClaim(
+                claim_id="c_53",
+                claim_key="final_dues_payment_days",
+                conclusion="Employer must pay all entitlements within 14 days from contract termination.",
+                cited_alignment_ids=["FDL_33_2021_A53_C1"],
+            )
+        ],
+        full_text="Employer must pay all entitlements within 14 days from contract termination. [FDL_33_2021_A53_C1]",
+        referenced_evidence=ev_53,
+    )
+
+    grounded = verifier.verify(query, draft, ev_53)
+    assert grounded.answerable is True
+    assert grounded.verification_status == VerificationStatus.VERIFIED
+    assert len(grounded.claims) == 1
+    assert grounded.claims[0].verification_status == VerificationStatus.VERIFIED

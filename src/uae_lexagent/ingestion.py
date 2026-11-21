@@ -92,9 +92,7 @@ def validate_source_manifest(
             else:
                 parent = source_map[source.derived_from_source_id]
                 if parent.artifact_type != "raw_pdf":
-                    issues.append(
-                        f"Source '{source.source_id}' must derive from a raw_pdf source."
-                    )
+                    issues.append(f"Source '{source.source_id}' must derive from a raw_pdf source.")
                 if parent.document_id != source.document_id:
                     issues.append(
                         f"Source '{source.source_id}' and its parent source belong to different documents."
@@ -104,9 +102,7 @@ def validate_source_manifest(
                         f"Source '{source.source_id}' and its parent source have different languages."
                     )
         elif Path(source.local_path).suffix.casefold() != ".pdf":
-            issues.append(
-                f"Raw PDF source '{source.source_id}' must use a .pdf local_path."
-            )
+            issues.append(f"Raw PDF source '{source.source_id}' must use a .pdf local_path.")
 
         if not file_path.exists():
             issues.append(f"Raw source file '{source.local_path}' does not exist on disk.")
@@ -236,10 +232,14 @@ def validate_bilingual_alignment(
             en_p = en_provisions[0]
 
             if not ar_p.is_authoritative:
-                issues.append(f"Arabic provision '{ar_p.provision_id}' in group '{align_id}' must be authoritative")
+                issues.append(
+                    f"Arabic provision '{ar_p.provision_id}' in group '{align_id}' must be authoritative"
+                )
 
             if en_p.is_authoritative:
-                issues.append(f"English provision '{en_p.provision_id}' in group '{align_id}' cannot be authoritative")
+                issues.append(
+                    f"English provision '{en_p.provision_id}' in group '{align_id}' cannot be authoritative"
+                )
 
             if en_p.translation_of not in prov_map:
                 issues.append(
@@ -255,10 +255,18 @@ def validate_bilingual_alignment(
             if en_p.document_id != ar_p.document_id:
                 issues.append(f"Alignment group '{align_id}' document mismatch between EN and AR")
             if en_p.jurisdiction != ar_p.jurisdiction:
-                issues.append(f"Alignment group '{align_id}' jurisdiction mismatch between EN and AR")
+                issues.append(
+                    f"Alignment group '{align_id}' jurisdiction mismatch between EN and AR"
+                )
             if en_p.legal_domain != ar_p.legal_domain:
-                issues.append(f"Alignment group '{align_id}' legal-domain mismatch between EN and AR")
-            if (en_p.article, en_p.clause, en_p.subclause) != (ar_p.article, ar_p.clause, ar_p.subclause):
+                issues.append(
+                    f"Alignment group '{align_id}' legal-domain mismatch between EN and AR"
+                )
+            if (en_p.article, en_p.clause, en_p.subclause) != (
+                ar_p.article,
+                ar_p.clause,
+                ar_p.subclause,
+            ):
                 issues.append(
                     f"Alignment group '{align_id}' article/clause metadata mismatch between EN and AR"
                 )
@@ -318,8 +326,7 @@ def validate_temporal_consistency(
         if len(group) != 2:
             continue
         effective_windows = {
-            (provision.effective_from, provision.effective_until)
-            for provision in group
+            (provision.effective_from, provision.effective_until) for provision in group
         }
         if len(effective_windows) > 1:
             issues.append(

@@ -5,10 +5,15 @@ from __future__ import annotations
 import math
 from datetime import date
 from typing import Any, Protocol, Sequence
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from ..models import Jurisdiction, Language, LegalProvision
-from .contracts import IndexedProvision, RankedCandidate, RetrievalFilters, matches_retrieval_filters
+from .contracts import (
+    IndexedProvision,
+    RankedCandidate,
+    RetrievalFilters,
+    matches_retrieval_filters,
+)
 
 _OPEN_ENDED_FROM = 1
 _OPEN_ENDED_UNTIL = 999999999
@@ -142,7 +147,7 @@ class QdrantVectorStore:
         self.collection_name = collection_name
         self.location = location
         self.dimension = dimension
-        self._client = None
+        self._client: Any = None
 
     def _load(self) -> Any:
         if self._client is None:
@@ -188,10 +193,18 @@ class QdrantVectorStore:
                         "jurisdiction": rec.jurisdiction.value,
                         "is_authoritative": rec.is_authoritative,
                         "document_id": rec.provision.document_id,
-                        "effective_from": rec.provision.effective_from.isoformat() if rec.provision.effective_from else None,
-                        "effective_until": rec.provision.effective_until.isoformat() if rec.provision.effective_until else None,
-                        "effective_from_ordinal": rec.provision.effective_from.toordinal() if rec.provision.effective_from else _OPEN_ENDED_FROM,
-                        "effective_until_ordinal": rec.provision.effective_until.toordinal() if rec.provision.effective_until else _OPEN_ENDED_UNTIL,
+                        "effective_from": rec.provision.effective_from.isoformat()
+                        if rec.provision.effective_from
+                        else None,
+                        "effective_until": rec.provision.effective_until.isoformat()
+                        if rec.provision.effective_until
+                        else None,
+                        "effective_from_ordinal": rec.provision.effective_from.toordinal()
+                        if rec.provision.effective_from
+                        else _OPEN_ENDED_FROM,
+                        "effective_until_ordinal": rec.provision.effective_until.toordinal()
+                        if rec.provision.effective_until
+                        else _OPEN_ENDED_UNTIL,
                         "legal_domain": rec.provision.legal_domain,
                         "provision_json": rec.provision.model_dump_json(),
                     },
@@ -208,7 +221,9 @@ class QdrantVectorStore:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
         if len(vector) != self.dimension:
-            raise ValueError(f"Query vector dimension mismatch: expected {self.dimension}, got {len(vector)}")
+            raise ValueError(
+                f"Query vector dimension mismatch: expected {self.dimension}, got {len(vector)}"
+            )
         client = self._load()
         from qdrant_client.http import models
 
@@ -228,7 +243,10 @@ class QdrantVectorStore:
                         match=models.MatchValue(value=True),
                     )
                 )
-            if not filters.include_translations and filters.language in (Language.EN, Language.AR):
+            if not filters.include_translations and filters.language in (
+                Language.EN,
+                Language.AR,
+            ):
                 must_conditions.append(
                     models.FieldCondition(
                         key="language",
@@ -306,7 +324,9 @@ class QdrantVectorStore:
         client = self._load()
         from qdrant_client.http import models
 
-        point_ids = [str(uuid5(NAMESPACE_URL, f"uae-lexagent:{pid}")) for pid in provision_ids]
+        point_ids: list[str | int | UUID] = [
+            str(uuid5(NAMESPACE_URL, f"uae-lexagent:{pid}")) for pid in provision_ids
+        ]
         client.delete(
             collection_name=self.collection_name,
             points_selector=models.PointIdsList(points=point_ids),

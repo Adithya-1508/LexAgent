@@ -49,9 +49,12 @@ def _detect_language(text: str) -> tuple[Language, Literal["en", "ar"]]:
     return Language.UNKNOWN, "en"
 
 
-def analyze_node(state: AgentState, provisions: Sequence[LegalProvision] | None = None) -> AgentState:
+def analyze_node(
+    state: AgentState, provisions: Sequence[LegalProvision] | None = None
+) -> AgentState:
     """Analyze query text, classify jurisdiction, check answerability, and decompose multi-hop intents."""
     start_time = time.perf_counter()
+    state.step_count += 1
 
     # 1. Language Detection
     lang, out_lang = _detect_language(state.query.text)
@@ -63,7 +66,11 @@ def analyze_node(state: AgentState, provisions: Sequence[LegalProvision] | None 
 
     # 2. Jurisdiction Routing
     juris_decision = classify_jurisdiction(state.query.text)
-    routed_juris = state.query.jurisdiction if state.query.jurisdiction != Jurisdiction.UNKNOWN else juris_decision.jurisdiction
+    routed_juris = (
+        state.query.jurisdiction
+        if state.query.jurisdiction != Jurisdiction.UNKNOWN
+        else juris_decision.jurisdiction
+    )
     state.jurisdiction = routed_juris
 
     state.routed_query = state.query.model_copy(
@@ -97,11 +104,19 @@ def analyze_node(state: AgentState, provisions: Sequence[LegalProvision] | None 
         return arabic if state.output_language == "ar" else english
 
     # 4. Detect Calculation Intent
-    salary_match = re.search(r"(?:basic\s+salary|salary|راتب)\s*(?:is|=|:)?\s*(?:aed\s*)?(\d+(?:\.\d+)?)", query_cf, re.IGNORECASE)
-    years_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:years?\s+of\s+service|years?\s+service|سنة|سنوات)", query_cf, re.IGNORECASE)
-    has_calc_intent = any(w in query_cf for w in ("calculate", "computation", "احسب", "كم يستحق", "حساب")) or (
-        bool(salary_match and years_match)
+    salary_match = re.search(
+        r"(?:basic\s+salary|salary|راتب)\s*(?:is|=|:)?\s*(?:aed\s*)?(\d+(?:\.\d+)?)",
+        query_cf,
+        re.IGNORECASE,
     )
+    years_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:years?\s+of\s+service|years?\s+service|سنة|سنوات)",
+        query_cf,
+        re.IGNORECASE,
+    )
+    has_calc_intent = any(
+        w in query_cf for w in ("calculate", "computation", "احسب", "كم يستحق", "حساب")
+    ) or (bool(salary_match and years_match))
 
     if has_calc_intent:
         state.intent = AgentIntent.CALCULATION
@@ -183,7 +198,10 @@ def analyze_node(state: AgentState, provisions: Sequence[LegalProvision] | None 
         rationale=f"Intent classified as {state.intent.value} with {len(state.sub_queries)} sub-queries.",
         duration_ms=duration_ms,
         output_summary=f"Sub-queries: {state.sub_queries}",
-        metadata={"intent": state.intent.value, "jurisdiction": state.jurisdiction.value},
+        metadata={
+            "intent": state.intent.value,
+            "jurisdiction": state.jurisdiction.value,
+        },
     )
     return state
 
@@ -195,11 +213,18 @@ def retrieval_node(
 ) -> AgentState:
     """Execute hybrid retrieval for all pending sub-queries with hard metadata pre-filtering."""
     start_time = time.perf_counter()
+    state.step_count += 1
 
     if state.is_timed_out() or not state.has_step_budget():
         state.current_status = AgentStatus.ABSTAINED
         state.abstention_reason = "exhausted_budget"
-        state.add_trace("retrieval_node", "timeout_check", "budget_exceeded", "Timeout or step budget reached.", 0.0)
+        state.add_trace(
+            "retrieval_node",
+            "timeout_check",
+            "budget_exceeded",
+            "Timeout or step budget reached.",
+            0.0,
+        )
         return state
 
     canonical_map = {p.provision_id: p for p in canonical_provisions}
@@ -267,7 +292,10 @@ def retrieval_node(
                 ),
             ):
                 continue
-            if state.jurisdiction != Jurisdiction.UNKNOWN and prov.jurisdiction != state.jurisdiction:
+            if (
+                state.jurisdiction != Jurisdiction.UNKNOWN
+                and prov.jurisdiction != state.jurisdiction
+            ):
                 continue
             if state.query.as_of is not None:
                 if prov.effective_from is not None and state.query.as_of < prov.effective_from:
@@ -282,25 +310,62 @@ def retrieval_node(
                     state.deduplicated_alignment_ids.add(align_id)
             else:
                 existing_index = next(
-                    index for index, item in enumerate(state.retrieved_evidence)
+                    index
+                    for index, item in enumerate(state.retrieved_evidence)
                     if (item.provision.alignment_id or item.provision.provision_id) == align_id
                 )
                 existing = state.retrieved_evidence[existing_index]
-                existing_score = max(
-                    value for value in (existing.reranker_score, existing.dense_score, existing.sparse_score)
-                    if value is not None
-                ) if any(value is not None for value in (existing.reranker_score, existing.dense_score, existing.sparse_score)) else float("-inf")
-                new_score = max(
-                    value for value in (ev.reranker_score, ev.dense_score, ev.sparse_score)
-                    if value is not None
-                ) if any(value is not None for value in (ev.reranker_score, ev.dense_score, ev.sparse_score)) else float("-inf")
+                existing_score = (
+                    max(
+                        value
+                        for value in (
+                            existing.reranker_score,
+                            existing.dense_score,
+                            existing.sparse_score,
+                        )
+                        if value is not None
+                    )
+                    if any(
+                        value is not None
+                        for value in (
+                            existing.reranker_score,
+                            existing.dense_score,
+                            existing.sparse_score,
+                        )
+                    )
+                    else float("-inf")
+                )
+                new_score = (
+                    max(
+                        value
+                        for value in (
+                            ev.reranker_score,
+                            ev.dense_score,
+                            ev.sparse_score,
+                        )
+                        if value is not None
+                    )
+                    if any(
+                        value is not None
+                        for value in (
+                            ev.reranker_score,
+                            ev.dense_score,
+                            ev.sparse_score,
+                        )
+                    )
+                    else float("-inf")
+                )
                 if new_score > existing_score:
                     state.retrieved_evidence[existing_index] = ev
 
         # Article-specific sub-queries need deterministic corpus expansion even
         # when lexical ranking buries the requested clause below unrelated hits.
-        article_match = re.search(r"(?:article|المادة|للمادة)\s*\(?\s*(\d+)\s*\)?", sub_q.casefold())
-        clause_match = re.search(r"(?:clause|paragraph|البند|الفقرة)\s*\(?\s*(\d+)\s*\)?", sub_q.casefold())
+        article_match = re.search(
+            r"(?:article|المادة|للمادة)\s*\(?\s*(\d+)\s*\)?", sub_q.casefold()
+        )
+        clause_match = re.search(
+            r"(?:clause|paragraph|البند|الفقرة)\s*\(?\s*(\d+)\s*\)?", sub_q.casefold()
+        )
         if article_match:
             requested_article = article_match.group(1)
             requested_clause = clause_match.group(1) if clause_match else None
@@ -354,6 +419,7 @@ def retrieval_node(
 def tool_node(state: AgentState) -> AgentState:
     """Execute statutory calculation tools gated by verified legal basis in retrieved evidence."""
     start_time = time.perf_counter()
+    state.step_count += 1
 
     # Tool execution must only proceed if legal basis is present in retrieved evidence
     gratuity_basis = "FDL_33_2021_A51_C2"
@@ -371,8 +437,16 @@ def tool_node(state: AgentState) -> AgentState:
         return state
 
     query_cf = state.query.text.casefold()
-    salary_match = re.search(r"(?:basic\s+salary|salary|راتب)\s*(?:is|=|:)?\s*(?:aed\s*)?(\d+(?:\.\d+)?)", query_cf, re.IGNORECASE)
-    years_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:years?\s+of\s+service|years?\s+service|سنة|سنوات)", query_cf, re.IGNORECASE)
+    salary_match = re.search(
+        r"(?:basic\s+salary|salary|راتب)\s*(?:is|=|:)?\s*(?:aed\s*)?(\d+(?:\.\d+)?)",
+        query_cf,
+        re.IGNORECASE,
+    )
+    years_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:years?\s+of\s+service|years?\s+service|سنة|سنوات)",
+        query_cf,
+        re.IGNORECASE,
+    )
 
     if salary_match and years_match:
         try:
@@ -404,7 +478,10 @@ def tool_node(state: AgentState) -> AgentState:
 
             tool_call = ToolCall(
                 tool_name="calculate_gratuity",
-                arguments={"basic_salary": float(salary_val), "service_years": float(years_val)},
+                arguments={
+                    "basic_salary": float(salary_val),
+                    "service_years": float(years_val),
+                },
                 result=calc_res,
                 valid_schema=True,
                 statutory_basis=gratuity_basis,
@@ -425,7 +502,7 @@ def tool_node(state: AgentState) -> AgentState:
             )
             return state
         except Exception as exc:
-            state.errors.append(f"Tool execution failed: {exc}")
+            state.errors.append(f"Tool execution failed: {type(exc).__name__}")
             state.current_status = AgentStatus.ABSTAINED
             state.abstention_reason = "invalid_tool_input"
 
@@ -445,11 +522,18 @@ def tool_node(state: AgentState) -> AgentState:
 def synthesis_node(state: AgentState, generator: GeneratorProtocol) -> AgentState:
     """Synthesize citation-grounded draft answer from evidence and validated tool results."""
     start_time = time.perf_counter()
+    state.step_count += 1
 
     if state.is_timed_out() or not state.has_step_budget():
         state.current_status = AgentStatus.ABSTAINED
         state.abstention_reason = "exhausted_budget"
-        state.add_trace("synthesis_node", "timeout_check", "budget_exceeded", "Budget exceeded.", 0.0)
+        state.add_trace(
+            "synthesis_node",
+            "timeout_check",
+            "budget_exceeded",
+            "Budget exceeded.",
+            0.0,
+        )
         return state
 
     try:
@@ -462,7 +546,7 @@ def synthesis_node(state: AgentState, generator: GeneratorProtocol) -> AgentStat
         )
         state.draft_answer = draft
     except Exception as exc:
-        state.errors.append(f"Generator failure: {exc}")
+        state.errors.append(f"Generator failure: {type(exc).__name__}")
         state.current_status = AgentStatus.ABSTAINED
         state.abstention_reason = "provider_failure"
         duration_ms = (time.perf_counter() - start_time) * 1000.0
@@ -470,7 +554,7 @@ def synthesis_node(state: AgentState, generator: GeneratorProtocol) -> AgentStat
             node_name="synthesis_node",
             action="generate_draft",
             status="failed",
-            rationale=f"Generator raised exception: {exc}. Safely routed to abstention.",
+            rationale=f"Generator raised {type(exc).__name__}. Safely routed to abstention.",
             duration_ms=duration_ms,
         )
         return state
@@ -491,6 +575,7 @@ def synthesis_node(state: AgentState, generator: GeneratorProtocol) -> AgentStat
 def verification_node(state: AgentState, verifier: CitationVerifier) -> AgentState:
     """Execute strict verification gate on draft claims and citations."""
     start_time = time.perf_counter()
+    state.step_count += 1
     state.verification_attempts += 1
 
     if not state.draft_answer:
@@ -516,15 +601,24 @@ def verification_node(state: AgentState, verifier: CitationVerifier) -> AgentSta
     if state.tool_results and grounded.claims:
         expected_total = Decimal(str(state.tool_results.get("total_gratuity", "0.0")))
         for vc in grounded.claims:
-            if vc.tool_derived and vc.claim_key == "gratuity_calculation" and vc.verification_status == VerificationStatus.VERIFIED:
+            if (
+                vc.tool_derived
+                and vc.claim_key == "gratuity_calculation"
+                and vc.verification_status == VerificationStatus.VERIFIED
+            ):
                 number_matches = {
                     Decimal(value) for value in re.findall(r"\b\d+(?:\.\d+)?\b", vc.conclusion)
                 }
                 if expected_total not in number_matches:
                     vc.verification_status = VerificationStatus.CONTRADICTED
-                    vc.verification_reasons.append("Claim numeric value does not match validated tool calculation.")
+                    vc.verification_reasons.append(
+                        "Claim numeric value does not match validated tool calculation."
+                    )
                     grounded.answerable = False
                     grounded.verification_status = VerificationStatus.CONTRADICTED
+                    grounded.abstention_reason = "contradictory_evidence"
+                    grounded.full_text = "**Abstention Notice**: Claim numeric value contradicts statutory tool calculation."
+                    grounded.summary = "Contradicted tool calculation."
 
     duration_ms = (time.perf_counter() - start_time) * 1000.0
 
@@ -554,25 +648,42 @@ def verification_node(state: AgentState, verifier: CitationVerifier) -> AgentSta
         rationale=f"Verification status: {grounded.verification_status.value} (Attempt {state.verification_attempts}/{state.max_attempts}).",
         duration_ms=duration_ms,
         output_summary=f"Answerable: {grounded.answerable}, Status: {grounded.verification_status.value}",
-        metadata={"status": grounded.verification_status.value, "attempt": state.verification_attempts},
+        metadata={
+            "status": grounded.verification_status.value,
+            "attempt": state.verification_attempts,
+        },
     )
     return state
 
 
-def reformulate_node(state: AgentState, canonical_provisions: Sequence[LegalProvision]) -> AgentState:
+def reformulate_node(
+    state: AgentState, canonical_provisions: Sequence[LegalProvision]
+) -> AgentState:
     """Analyze unverified claims, formulate targeted sub-queries, and schedule re-retrieval."""
     start_time = time.perf_counter()
+    state.step_count += 1
 
-    if state.verification_attempts >= state.max_attempts or state.is_timed_out() or not state.has_step_budget():
+    if (
+        state.verification_attempts >= state.max_attempts
+        or state.is_timed_out()
+        or not state.has_step_budget()
+    ):
         state.current_status = AgentStatus.ABSTAINED
         state.abstention_reason = "exhausted_budget"
         duration_ms = (time.perf_counter() - start_time) * 1000.0
-        state.add_trace("reformulate_node", "budget_check", "abstained", "Exhausted retry budget.", duration_ms)
+        state.add_trace(
+            "reformulate_node",
+            "budget_check",
+            "abstained",
+            "Exhausted retry budget.",
+            duration_ms,
+        )
         return state
 
     # Identify unverified claims
     unverified_claims = [
-        c for c in (state.verified_answer.claims if state.verified_answer else [])
+        c
+        for c in (state.verified_answer.claims if state.verified_answer else [])
         if c.verification_status == VerificationStatus.UNVERIFIED
     ]
 
@@ -619,6 +730,7 @@ def reformulate_node(state: AgentState, canonical_provisions: Sequence[LegalProv
 def abstain_node(state: AgentState, verifier: CitationVerifier) -> AgentState:
     """Produce formal, citation-bounded abstention response."""
     start_time = time.perf_counter()
+    state.step_count += 1
     reason = state.abstention_reason or "policy_abstention"
 
     state.verified_answer = GroundedLegalAnswer(
@@ -652,21 +764,53 @@ def abstain_node(state: AgentState, verifier: CitationVerifier) -> AgentState:
 def finalize_node(state: AgentState) -> LegalResponse:
     """Map final agent state into canonical LegalResponse with complete audit trace."""
     start_time = time.perf_counter()
+    state.step_count += 1
 
     ans = state.verified_answer
-    if ans is None:
-        answer_text = "**Abstention Notice**: The query could not be verified."
+    if ans is None or not ans.answerable:
+        reason = (
+            state.abstention_reason
+            or (ans.abstention_reason if ans else None)
+            or "unverified_claim"
+        )
+        if ans and ans.full_text and ans.full_text.startswith("**Abstention Notice**"):
+            answer_text = ans.full_text
+        else:
+            answer_text = f"**Abstention Notice**: The query could not be verified against the official legal corpus ({reason})."
         answerable = False
-        claims: list[Claim] = []
+        claims: list[Claim] = [
+            Claim(
+                claim_id=c.claim_id,
+                text=c.conclusion,
+                claim_key=c.claim_key,
+                cited_alignment_ids=c.cited_alignment_ids,
+                evidence_ids=[],
+                supported=False,
+            )
+            for c in (ans.claims if ans else [])
+        ]
         evidence: list[LegalEvidence] = []
-        ver_result = VerificationResult(passed=False, issues=["No verified answer produced."])
+        ver_result = VerificationResult(
+            passed=False,
+            citation_valid=False,
+            claims_grounded=False,
+            jurisdiction_valid=(state.jurisdiction == Jurisdiction.UAE_ONSHORE),
+            temporal_valid=True,
+            bilingual_consistent=None,
+            schema_valid=True,
+            issues=(
+                [r for claim in (ans.claims if ans else []) for r in claim.verification_reasons]
+                + state.errors
+                + [reason]
+            ),
+        )
     else:
         answer_text = ans.full_text
         answerable = ans.answerable
         evidence = ans.referenced_evidence
 
         # Map synthesis claims to canonical Claim objects
-        evidence_id_by_align = {}
+        evidence_id_by_align: dict[str, list[str]] = {}
         for ev in state.retrieved_evidence:
             align_id = ev.provision.alignment_id or ev.provision.provision_id
             evidence_id_by_align.setdefault(align_id, []).append(ev.evidence_id)
@@ -689,18 +833,27 @@ def finalize_node(state: AgentState) -> LegalResponse:
 
         ver_result = VerificationResult(
             passed=(ans.verification_status == VerificationStatus.VERIFIED),
-            citation_valid=all(vc.verification_status == VerificationStatus.VERIFIED for vc in ans.claims) if ans.claims else False,
-            claims_grounded=bool(ans.claims) and all(
+            citation_valid=all(
                 vc.verification_status == VerificationStatus.VERIFIED for vc in ans.claims
-            ),
+            )
+            if ans.claims
+            else False,
+            claims_grounded=bool(ans.claims)
+            and all(vc.verification_status == VerificationStatus.VERIFIED for vc in ans.claims),
             jurisdiction_valid=(state.jurisdiction == Jurisdiction.UAE_ONSHORE)
             and all(ev.provision.jurisdiction == state.jurisdiction for ev in evidence),
             temporal_valid=all(
                 (
                     state.query.as_of is None
                     or (
-                        (ev.provision.effective_from is None or state.query.as_of >= ev.provision.effective_from)
-                        and (ev.provision.effective_until is None or state.query.as_of <= ev.provision.effective_until)
+                        (
+                            ev.provision.effective_from is None
+                            or state.query.as_of >= ev.provision.effective_from
+                        )
+                        and (
+                            ev.provision.effective_until is None
+                            or state.query.as_of <= ev.provision.effective_until
+                        )
                     )
                 )
                 for ev in evidence
@@ -708,11 +861,7 @@ def finalize_node(state: AgentState) -> LegalResponse:
             bilingual_consistent=None,
             schema_valid=True,
             issues=(
-                [
-                    reason
-                    for claim in ans.claims
-                    for reason in claim.verification_reasons
-                ]
+                [reason for claim in ans.claims for reason in claim.verification_reasons]
                 + state.errors
                 + ([] if ans.answerable else [ans.abstention_reason or "verification_failure"])
             ),
@@ -740,7 +889,11 @@ def finalize_node(state: AgentState) -> LegalResponse:
         verification=ver_result,
         confidence=(
             min(
-                [claim.support_score for claim in ans.claims if claim.verification_status == VerificationStatus.VERIFIED]
+                [
+                    claim.support_score
+                    for claim in (ans.claims if ans else [])
+                    if claim.verification_status == VerificationStatus.VERIFIED
+                ]
                 or [0.0]
             )
             if answerable

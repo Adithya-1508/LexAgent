@@ -27,7 +27,7 @@ class LegalFact(BaseModel):
     article: str | None = None
     clause: str | None = None
     subject: str | None = None  # "employer", "worker", "contract"
-    action: str | None = None   # "notice", "terminate", "probation", "non_compete", "gratuity"
+    action: str | None = None  # "notice", "terminate", "probation", "non_compete", "gratuity"
     numeric_values: list[Decimal] = Field(default_factory=list)
     numeric_units: list[str] = Field(default_factory=list)  # "days", "months", "years", "aed"
     quantities: list[LegalQuantity] = Field(default_factory=list)
@@ -69,7 +69,9 @@ _NUMERIC_MAP_ENGLISH = {
 }
 
 
-def extract_numbers_and_units(text: str) -> tuple[list[Decimal], list[str], list[LegalQuantity]]:
+def extract_numbers_and_units(
+    text: str,
+) -> tuple[list[Decimal], list[str], list[LegalQuantity]]:
     """Extract numeric quantities and associated temporal/monetary units."""
     numbers: list[Decimal] = []
     units: list[str] = []
@@ -112,10 +114,13 @@ def extract_numbers_and_units(text: str) -> tuple[list[Decimal], list[str], list
             if unit_match:
                 raw = unit_match.group(1)
                 normalized = (
-                    "days" if "يوم" in raw else
-                    "months" if "شهر" in raw else
-                    "years" if any(token in raw for token in ("سن", "عام")) else
-                    "aed"
+                    "days"
+                    if "يوم" in raw
+                    else "months"
+                    if "شهر" in raw
+                    else "years"
+                    if any(token in raw for token in ("سن", "عام"))
+                    else "aed"
                 )
                 if normalized not in units:
                     units.append(normalized)
@@ -131,7 +136,15 @@ def extract_numbers_and_units(text: str) -> tuple[list[Decimal], list[str], list
             )
             if unit_match:
                 raw = unit_match.group(1)
-                normalized = "days" if raw.startswith("day") else "months" if raw.startswith("month") else "years" if raw.startswith("year") else "aed"
+                normalized = (
+                    "days"
+                    if raw.startswith("day")
+                    else "months"
+                    if raw.startswith("month")
+                    else "years"
+                    if raw.startswith("year")
+                    else "aed"
+                )
                 if normalized not in units:
                     units.append(normalized)
                 quantities.append(LegalQuantity(value=dec_val, unit=normalized))
@@ -157,7 +170,18 @@ def extract_legal_facts(text: str, claim_key_hint: str | None = None) -> list[Le
 
     # Polarity / Negation
     polarity: Literal["positive", "negative", "unknown"] = "positive"
-    if any(neg in text_cf for neg in ("not exceed", "shall not", "may not", "لا يجوز", "يحظر", "لا يتم", "دون")):
+    if any(
+        neg in text_cf
+        for neg in (
+            "not exceed",
+            "shall not",
+            "may not",
+            "لا يجوز",
+            "يحظر",
+            "لا يتم",
+            "دون",
+        )
+    ):
         polarity = "negative"
 
     # Identify primary legal subject and domain
@@ -172,13 +196,22 @@ def extract_legal_facts(text: str, claim_key_hint: str | None = None) -> list[Le
     if "probation" in text_cf or "تجربة" in text_cf or "اختبار" in text_cf:
         if any(m in text_cf for m in ("max", "exceed", "duration", "مدتها", "مدة")):
             key = "probation_max_months"
-        elif subject == "employer" and ("notice" in text_cf or "إخطار" in text_cf or "اخطار" in text_cf):
+        elif subject == "employer" and (
+            "notice" in text_cf or "إخطار" in text_cf or "اخطار" in text_cf
+        ):
             key = "probation_employer_notice_days"
-        elif subject == "worker" and ("transfer" in text_cf or "another employer" in text_cf or "صاحب عمل آخر" in text_cf):
+        elif subject == "worker" and (
+            "transfer" in text_cf or "another employer" in text_cf or "صاحب عمل آخر" in text_cf
+        ):
             key = "probation_employee_transfer_notice_months"
         elif subject == "worker" and ("leave the state" in text_cf or "مغادرة الدولة" in text_cf):
             key = "probation_employee_departure_notice_days"
-        elif "recruitment" in text_cf or "compensation" in text_cf or "استقدام" in text_cf or "تعويض" in text_cf:
+        elif (
+            "recruitment" in text_cf
+            or "compensation" in text_cf
+            or "استقدام" in text_cf
+            or "تعويض" in text_cf
+        ):
             key = "probation_recruitment_compensation"
     elif "non-compete" in text_cf or "عدم المنافسة" in text_cf or "عدم منافسة" in text_cf:
         key = "non_compete_max_years"
