@@ -39,7 +39,7 @@ LexAgent uses **Lefthook v2.2.2** for fast, deterministic local pre-commit and p
 
 ### 1.2 Inspection, Activation & Upgrades
 
-Lefthook installs hook wrappers into the repository's effective Git hooks directory (defaulting to `.git/hooks/`, or respecting `core.hooksPath` if configured in local or global Git configuration).
+Lefthook installs hook wrappers into the repository's `.git/hooks/` directory. Note that custom Git hooks paths are not supported by default: if `core.hooksPath` is configured in local or global Git configuration, Lefthook installation refuses execution with an error (`Custom hooks paths are not supported by default`), rather than automatically respecting the custom path. Developers must unset `core.hooksPath` (e.g. `git config --unset-all core.hooksPath`), reset it with `lefthook install --reset-hooks-path`, or explicitly force installation into the custom path.
 
 > [!WARNING]
 > **Pre-Existing Hook & Backup Inspection Required**:
@@ -47,13 +47,14 @@ Lefthook installs hook wrappers into the repository's effective Git hooks direct
 > 
 > 1. **Foreign Hooks:** When Lefthook installs a hook wrapper, it renames any pre-existing non-Lefthook hook to `<hook-name>.old`. Git executes `<hook-name>` only; `<hook-name>.old` will **never** be executed during subsequent Git operations. If an active non-Lefthook hook is discovered, **do not install**. Stop and obtain repository owner approval for an explicit chaining strategy.
 > 2. **Pre-Existing Backups:** If a `<hook-name>.old` already exists from a previous installation, Lefthook halts installation to avoid clobbering existing backups. Developers must inspect and safeguard pre-existing `.old` files before proceeding.
-> 3. **Native Tooling Side Effects (`.github/hooks/lefthook.json`):** Lefthook v2.2.2 includes an `ai.copilot` integration feature that writes `.github/hooks/lefthook.json` when Copilot hooks are configured. In LexAgent, `ai.copilot` is omitted, so `.github/hooks/lefthook.json` is not generated.
+> 3. **Native Tooling Side Effects (`.github/hooks/lefthook.json`):** Lefthook v2.2.2 includes an `ai.copilot` integration routine during both installation and uninstallation. When `ai.copilot` is omitted (as in LexAgent), Lefthook's installation routine actively removes any existing `.github/hooks/lefthook.json` file, as does `uninstall`. Developers must check for and preserve any existing `.github/hooks/lefthook.json` before running `lefthook install` or `lefthook uninstall` to prevent unintended deletion.
 
 #### Initial Activation in a Clean Checkout:
 
 ```bash
-# 1. Inspect effective hooks directory for existing hooks or backups
+# 1. Inspect effective hooks directory and check for existing .github/hooks/lefthook.json
 ls -la .git/hooks
+ls -la .github/hooks 2>/dev/null || true
 
 # 2. Provision virtual environment dependencies
 uv sync --extra dev
@@ -67,14 +68,22 @@ uv run --no-sync --offline python -m lefthook install
 To upgrade existing local wrappers to the verified fail-closed baseline:
 
 ```bash
-# 1. Verify no foreign hooks or uninspected .old backups exist in .git/hooks/
+# 1. Verify no foreign hooks or uninspected .old backups exist in .git/hooks/,
+#    and preserve any existing .github/hooks/lefthook.json
 ls -la .git/hooks
+ls -la .github/hooks 2>/dev/null || true
 
 # 2. Perform normal wrapper installation using the pinned offline launcher
 uv run --no-sync --offline python -m lefthook install
 
-# 3. Verify generated wrappers contain assert_lefthook_installed and fail-closed launcher
+# 3. Verify both generated wrappers contain assert_lefthook_installed and fail-closed launcher
 head -n 25 .git/hooks/pre-commit
+head -n 25 .git/hooks/pre-push
+
+# 4. Demonstrate fail-closed nonzero exit status when the runner is unavailable
+#    (both wrappers must return nonzero exit code 127/1 rather than succeeding):
+(PATH="/nonexistent" .git/hooks/pre-commit); echo "Pre-commit exit status: $?"
+(PATH="/nonexistent" .git/hooks/pre-push); echo "Pre-push exit status: $?"
 ```
 
 > [!IMPORTANT]
@@ -138,8 +147,11 @@ Rollback is strictly partitioned between local developer hook deactivation and r
 #### Procedure A: Local Developer Hook Deactivation (Non-Destructive)
 If an individual contributor wishes to deactivate Lefthook hooks on their local checkout without affecting tracked repository files or other contributors:
 ```bash
+# Check and preserve any existing .github/hooks/lefthook.json before uninstalling if needed:
+# Lefthook uninstall removes .github/hooks/lefthook.json if present.
+#
 # Removes Lefthook-managed hook wrappers in .git/hooks/, cleans up .git/lefthook.checksum,
-# restores any pre-existing .old backup hooks, and cleans up .github/hooks/lefthook.json (if present).
+# and restores any pre-existing .old backup hooks.
 # Does NOT touch core.hooksPath, tracked repository files, or user agent skills.
 uv run --no-sync --offline python -m lefthook uninstall
 ```
