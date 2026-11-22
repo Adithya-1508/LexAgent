@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://lefthook.dev/schema.json
+glob_matcher: doublestar
+
+output:
+  - summary
+  - failure
+
+pre-commit:
+  parallel: true
+  commands:
+    ruff-lint:
+      glob: "**/*.py"
+      run: uv run ruff check {staged_files}
+    ruff-format:
+      glob: "**/*.py"
+      run: uv run ruff format --check {staged_files}
+
+pre-push:
+  parallel: false
+  commands:
+    mypy:
+      run: uv run mypy src/
+    legal-safety:
+      run: uv run pytest -q -m legal_safety
