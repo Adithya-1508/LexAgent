@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://lefthook.dev/schema.json
+min_version: 2.2.2
+assert_lefthook_installed: true
+no_auto_install: true
+glob_matcher: doublestar
+lefthook: uv run --no-sync --offline python -m lefthook
+
+output:
+  - summary
+  - failure
+
+pre-commit:
+  parallel: true
+  commands:
+    ruff-lint:
+      glob: "**/*.py"
+      run: uv run --no-sync --offline ruff check -- {staged_files}
+    ruff-format:
+      glob: "**/*.py"
+      run: uv run --no-sync --offline ruff format --check -- {staged_files}
+
+pre-push:
+  scripts:
+    "quality_checks.py":
+      runner: uv run --no-sync --offline python
