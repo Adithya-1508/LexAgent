@@ -1,4 +1,7 @@
 # yaml-language-server: $schema=https://lefthook.dev/schema.json
+min_version: 2.2.2
+assert_lefthook_installed: true
+no_auto_install: true
 glob_matcher: doublestar
 
 output:
@@ -10,15 +13,17 @@ pre-commit:
   commands:
     ruff-lint:
       glob: "**/*.py"
-      run: uv run ruff check {staged_files}
+      run: uv run --no-sync --offline ruff check -- {staged_files}
     ruff-format:
       glob: "**/*.py"
-      run: uv run ruff format --check {staged_files}
+      run: uv run --no-sync --offline ruff format --check -- {staged_files}
 
 pre-push:
   parallel: false
   commands:
     mypy:
-      run: uv run mypy src/
+      files: git ls-files -- pyproject.toml
+      run: uv run --no-sync --offline mypy --config-file {files} src/
     legal-safety:
-      run: uv run pytest -q -m legal_safety
+      files: git ls-files -- pyproject.toml
+      run: uv run --no-sync --offline pytest -c {files} -q -m legal_safety
