@@ -3,6 +3,7 @@ min_version: 2.2.2
 assert_lefthook_installed: true
 no_auto_install: true
 glob_matcher: doublestar
+lefthook: uv run --no-sync --offline python -m lefthook
 
 output:
   - summary
@@ -19,11 +20,6 @@ pre-commit:
       run: uv run --no-sync --offline ruff format --check -- {staged_files}
 
 pre-push:
-  parallel: false
-  commands:
-    mypy:
-      files: git ls-files -- pyproject.toml
-      run: uv run --no-sync --offline mypy --config-file {files} src/
-    legal-safety:
-      files: git ls-files -- pyproject.toml
-      run: uv run --no-sync --offline pytest -c {files} -q -m legal_safety
+  scripts:
+    "quality_checks.py":
+      runner: uv run --no-sync --offline python
