@@ -1,12 +1,12 @@
 {
-  "source_id": "GOV_UAE_FDL_33_2021_HTML",
-  "document_id": "FDL_33_2021",
+  "source_id": "SYNTHETIC_TEST_ONLY_GOV_UAE_FDL_33_2021_HTML",
+  "document_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021",
   "language": "ar",
   "publisher": "UAE Ministry of Justice / General Secretariat of the Cabinet",
   "source_url": "https://uaelegislation.gov.ae/ar/legislations/1541",
-  "local_path": "data/official_sources/snapshots/e3/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.html",
+  "local_path": "data/official_sources/snapshots/synthetic/0f/0f8ca43042620b43483b95926bdeb42cbbd1b60d784266cdb9d672addd21c92d.html",
   "retrieved_at": "2026-11-20T10:00:00Z",
-  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "sha256": "0f8ca43042620b43483b95926bdeb42cbbd1b60d784266cdb9d672addd21c92d",
   "page_count": null,
   "is_authoritative": true,
   "artifact_type": "raw_html",
@@ -17,6 +17,6 @@
   "extraction_method": "html_dom",
   "authenticity_tier": "GOV_AUTOMATED_TLS_VERIFIED",
   "attestation_id": null,
-  "tls_cert_fingerprint": "SHA256:7b91d24ef2898c192803859d02e88a0b384628efaa0b1828103323a7bb43d679",
+  "tls_cert_fingerprint": "SHA256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "redistribution_clearance": "verified_public_law"
 }

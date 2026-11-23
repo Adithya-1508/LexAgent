@@ -68,5 +68,47 @@
       ],
       "default": null
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "corroboration_type": {
+            "const": "none_operator_only"
+          }
+        },
+        "required": [
+          "corroboration_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "independent_cross_check_passed": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "independent_cross_check_passed": {
+            "const": true
+          }
+        },
+        "required": [
+          "independent_cross_check_passed"
+        ]
+      },
+      "then": {
+        "not": {
+          "properties": {
+            "corroboration_type": {
+              "const": "none_operator_only"
+            }
+          }
+        }
+      }
+    }
+  ]
 }

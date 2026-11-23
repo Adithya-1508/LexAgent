@@ -1,22 +1,22 @@
 {
-  "release_version": "5.2.0-alpha.1",
+  "release_version": "5.2.0-synthetic-test.1",
   "schema_version": "5.2.0",
   "built_at_utc": "2026-11-21T12:00:00Z",
   "git_commit_sha": "ab14df9876543210abcdef0123456789abcdef01",
   "effective_as_of_max": "2024-08-31",
-  "corpus_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "corpus_fingerprint": "4676bd2cf67ece0f245188bc5053c0264b74777cf9d0be6f681766b9ed8ff5af",
   "claim_key_registry_sha256": "ca978112ca1bbdcdafac231b39a23dc4da78608149644015673d76326a31f740",
   "documents": [
     {
-      "document_id": "FDL_33_2021",
-      "document_path": "data/official_sources/fdl_33_2021_document.json",
-      "provisions_path": "data/official_sources/fdl_33_2021_provisions.json",
+      "document_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021",
+      "document_path": "data/official_sources/synthetic/fdl_33_2021_document.json",
+      "provisions_path": "data/official_sources/synthetic/fdl_33_2021_provisions.json",
       "completeness": "COMPLETE",
       "missing_article_numbers": []
     }
   ],
   "artifact_checksums": {
-    "data/official_sources/fdl_33_2021_provisions.json": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    "data/official_sources/synthetic/fdl_33_2021_provisions.json": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
   },
   "publication_summary": {
     "verified_publishable": 74,

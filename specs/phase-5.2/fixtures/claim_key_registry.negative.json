@@ -2,7 +2,7 @@
   "schema_version": "5.2.0",
   "entries": [
     {
-      "logical_provision_id": "FDL_33_2021_ART_51_01",
+      "logical_provision_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_51_02",
       "applicable_version_ids": [],
       "claim_key": "gratuity_entitlement",
       "review_status": "invalid_status",

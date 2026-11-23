@@ -11,7 +11,6 @@
     "target_logical_provision_id",
     "action",
     "effective_date",
-    "new_version_id",
     "source_id"
   ],
   "properties": {
@@ -59,11 +58,97 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "default": null
     },
     "source_id": {
       "type": "string",
       "minLength": 1
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "replaces",
+              "amends"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "prior_version_id",
+          "new_version_id"
+        ],
+        "properties": {
+          "prior_version_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "new_version_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "repeals"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "prior_version_id"
+        ],
+        "properties": {
+          "prior_version_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "new_version_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "adds"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "new_version_id"
+        ],
+        "properties": {
+          "prior_version_id": {
+            "type": "null"
+          },
+          "new_version_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
 }

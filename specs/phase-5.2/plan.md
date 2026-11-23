@@ -48,7 +48,22 @@ Phase 5.2 decouples the **offline corpus build pipeline** (`src/uae_lexagent/cor
 └─────────────────────────────────────────────────────────────────┘
        │
        ▼
-[Multi-Version RetrievalIndex] -> [Fail-Closed RetrievalFilters] -> [Data-Driven CitationVerifier]
+[Multi-Version RetrievalIndex]
+       │
+       ▼
+[Candidate Version Pruning & Same-Version Bilingual Alignment]
+       │
+       ▼
+[Hybrid Fusion (BM25 + Vector + Reciprocal Rank Fusion)]
+       │
+       ▼
+[Fail-Closed RetrievalFilters & BoundaryRegistry Scope Checks]
+       │
+       ▼
+[Data-Driven CitationVerifier (Version-Scoped Claim Authorization)]
+       │
+       ▼
+[Dual-Path Caveat/Disclosure Propagation (GroundedLegalAnswer & LegalResponse)]
 ```
 
 ## 2. Architecture Decision Records (ADRs)
@@ -87,17 +102,23 @@ Phase 5.2 decouples the **offline corpus build pipeline** (`src/uae_lexagent/cor
 - **Alternatives:** (A) All-or-nothing corpus release + hardcoded `_ALIGNMENT_CLAIM_KEYS`; (B) **Separate `DocumentCompleteness` from `PublicationState`, enable partial releases with quarantine ledgers, and replace `_ALIGNMENT_CLAIM_KEYS` with a checksummed, fail-closed `claim_key_registry.json`**.
 - **Decision:** **Option B.** Allows independently verified articles to ship safely while quarantining defects and ensuring new provisions authorize zero claims until human-reviewed entries are added.
 
+### ADR-008: Fail-Closed Current-Law Boundary, Freshness Horizon & Dual-Path Disclosure
+- **Alternatives:** (A) Open-world assumption (assume unmentioned topics have not been amended); (B) Silent temporal clamping without disclosure; (C) **Closed-world positive topic coverage, 180-day freshness horizon clock, and dual-path mandatory disclosure propagation**.
+- **Decision:** **Option C.** Absence of an amending decree in the corpus cannot be treated as evidence that the law has not changed. A legal topic cannot be served as "current law" without positive confirmation that all amending instruments up to `system_cutoff` (2024-08-31) are fully ingested and verified. If topic coverage is unknown or incomplete in `BoundaryRegistry`, retrieval fails closed with explicit abstention (`stale_or_incomplete_amendment_coverage`). When `as_of` is omitted on user queries, it resolves tentatively to `system_cutoff = 2024-08-31` with mandatory `TEMPORAL_CUTOFF_DISCLOSURE`. If query execution time exceeds 180 days past `system_cutoff`, the system MUST fail closed and abstain on current-law questions (`abstention_reason="corpus_verification_expired"`). A warning alone **MUST NEVER** authorize a current-law answer. Substantive answers are strictly permitted only for explicit historical queries where `as_of <= system_cutoff` and topic coverage is verified. Disclosures propagate through both `GroundedLegalAnswer.caveat_disclosures` and `LegalResponse.caveat_disclosures`.
+
 ## 3. Repository Module Touchpoints
 
 | Path | Change Type | Summary |
 |---|---|---|
 | `pyproject.toml` | Modify | Add optional `[corpus]` extra (`httpx`, `beautifulsoup4`, `lxml`, `pymupdf`, `hypothesis`); keep core dependencies strictly `pydantic>=2.7,<3` |
-| `src/uae_lexagent/models.py` | Modify | Add enums (`AuthenticityTier`, `DocumentCompleteness`, `PublicationState`, `LifecycleState`); extend `LegalSource`, `LegalDocument`, `LegalProvision` with fail-closed defaults; add `ManualAttestation`, `AmendmentEdge`, `BilingualAlignmentAudit`, `ClaimKeyRegistryEntry`, `CorpusReleaseManifest` |
-| `src/uae_lexagent/corpus/` | Add (new subpackage) | `acquisition.py`, `extractor.py`, `normalizer.py`, `aligner.py`, `release.py` (offline pipeline; never imported by core runtime unless invoked) |
-| `src/uae_lexagent/ingestion.py` | Modify | Unify `RV-01`–`RV-11` validation engine; support `.html` snapshots, `archival_reference`, `ManualAttestation`, `unavailable_official`, temporal overlap/gap checks |
-| `src/uae_lexagent/evaluation/validate.py` | Modify | Remove hardcoded 2-instrument file list; read `release_manifest.json`; delegate core checks to unified validator; print granular publication & quarantine ledger |
-| `src/uae_lexagent/retrieval/contracts.py` | Modify | Add `include_caveated: bool = False`, `allow_legacy_unverified: bool = False`, `accepted_caveat_codes: tuple[str, ...] = ()` to `RetrievalFilters`; enforce exact `as_of` & quarantine checks |
-| `src/uae_lexagent/retrieval/indexing.py` | Modify | Multi-version `version_map` & `versions_by_logical_id`; exclude `UNRESOLVED_HISTORICAL` and `BLOCKED_LEGAL_TOPIC` from dense/sparse stores while retaining `quarantine_registry` for explicit abstention |
+| `src/uae_lexagent/models.py` | Modify | Add enums (`AuthenticityTier`, `DocumentCompleteness`, `PublicationState`, `LifecycleState`, `BoundaryStatus`); extend `LegalSource`, `LegalDocument`, `LegalProvision` with fail-closed defaults; add `ManualAttestation`, `AmendmentEdge`, `BilingualAlignmentAudit`, `ClaimKeyRegistryEntry`, `BoundaryRegistryEntry`, `CorpusReleaseManifest` |
+| `src/uae_lexagent/corpus/` | Add (new subpackage) | `acquisition.py`, `extractor.py`, `normalizer.py`, `aligner.py`, `release.py` (offline pipeline; supports `SOURCE_DATE_EPOCH` reproducible build timestamps; never imported by core runtime unless invoked) |
+| `src/uae_lexagent/ingestion.py` | Modify | Unify `RV-01`–`RV-11` validation engine; support `.html` snapshots, `archival_reference`, `ManualAttestation`, `unavailable_official`, same-version bilingual alignment, temporal overlap/gap checks |
+| `src/uae_lexagent/evaluation/validate.py` | Modify | Remove hardcoded 2-instrument file list; read `release_manifest.json`; delegate core checks to unified validator; mandate offline release verification before corpus publication/tagging; print granular publication & quarantine ledger |
+| `src/uae_lexagent/retrieval/contracts.py` | Modify | Add `include_caveated: bool = False`, `allow_legacy_unverified: bool = False`, `accepted_caveat_codes: tuple[str, ...] = ()` to `RetrievalFilters`; enforce exact `as_of`, BoundaryRegistry scope checks, & quarantine abstentions |
+| `src/uae_lexagent/retrieval/indexing.py` | Modify | Multi-version `version_map` & `versions_by_logical_id`; exclude `UNRESOLVED_HISTORICAL` and `BLOCKED_LEGAL_TOPIC` from dense/sparse stores while retaining `quarantine_registry` for explicit abstention; prune candidate versions prior to rank fusion; enforce same-version bilingual alignment collapsing |
+| `src/uae_lexagent/retrieval/retriever.py` | Modify | Hybrid retrieval combining BM25 keyword search, dense vector similarity, and Reciprocal Rank Fusion (RRF); version candidate pruning before fusion; version-scoped citation mapping |
 | `src/uae_lexagent/synthesis/contracts.py` | Modify | Add `caveat_disclosures: list[str] = Field(default_factory=list)` and `resolved_as_of: date | None = None` to `GroundedLegalAnswer` |
-| `src/uae_lexagent/synthesis/verifier.py` | Modify | Load checksummed `claim_key_registry.json` (fail-closed); version-scoped citation resolution; enforce mandatory caveat disclosure |
+| `src/uae_lexagent/synthesis/verifier.py` | Modify | Load checksummed `claim_key_registry.json` (fail-closed); version-scoped citation resolution; enforce mandatory caveat disclosure and historical answer caveats |
+| `src/uae_lexagent/agent.py` | Modify | Propagate caveat disclosures to `LegalResponse.caveat_disclosures`; enforce BoundaryRegistry pre-retrieval routing abstentions and post-synthesis disclosure validation |
 | `.github/workflows/ci.yml` | Modify | Add offline manifest/claim-registry tamper check and `[corpus]` optional test matrix while preserving all 8 existing jobs (`bandit`, `pip-audit`, `core-minimal`, etc.) |

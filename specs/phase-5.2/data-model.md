@@ -5,7 +5,7 @@
 ### `AuthenticityTier` (on `LegalSource`)
 - `GOV_AUTOMATED_TLS_VERIFIED`: Automated HTTPS capture from allowlisted `*.gov.ae` host with recorded TLS certificate fingerprint, HTTP status, headers, and SHA-256.
 - `GOV_INDEPENDENTLY_CORROBORATED`: Manually captured artifact corroborated by an independent government verification mechanism (byte-match against automated mirror, verified UAE government PDF digital signature, or automated portal cross-check).
-- `OPERATOR_ATTESTED_ONLY`: Manually supplied file with complete `ManualAttestation`, lacking automated TLS or cryptographic government signature proof.
+- `OPERATOR_ATTESTED_ONLY`: Manually supplied file with complete `ManualAttestation`, lacking automated TLS or cryptographic government signature proof. Carries mandatory caveat `OPERATOR_ATTESTED_SOURCE_ONLY`. An operator attestation or caveat is **never** treated as independent government authentication.
 - `LEGACY_UNATTESTED`: Default for pre-Phase 5.2 derived `.txt` sources without upstream raw snapshots.
 
 ### `DocumentCompleteness` (on `LegalDocument` ONLY)
@@ -17,12 +17,14 @@
 ### `PublicationState` (on `LegalProvision` ONLY)
 - `VERIFIED_PUBLISHABLE`: Passes `RV-01`–`RV-11` with `GOV_AUTOMATED_TLS_VERIFIED` or `GOV_INDEPENDENTLY_CORROBORATED` authenticity and no active caveats. Served by default in ordinary retrieval.
 - `PUBLISHED_WITH_CAVEAT`: Authoritative text verified, but carries >=1 mandatory `caveat_codes` (e.g., `STATUTORY_INTERACTION_CR_96_2023`, `OFFICIAL_EN_UNAVAILABLE`, `OPERATOR_ATTESTED_SOURCE_ONLY`). Excluded from ordinary retrieval by default (`include_caveated=False`); requires explicit opt-in and disclosure enforcement.
-- `LEGACY_UNVERIFIED`: **Default** for Phase 5.1 records loaded without Phase 5.2 migration. Excluded from ordinary retrieval by default (`allow_legacy_unverified=False`). Never auto-promoted.
+- `LEGACY_UNVERIFIED`: **Default** for Phase 5.1 records loaded without Phase 5.2 migration. Excluded from ordinary retrieval by default (`allow_legacy_unverified=False`). Never auto-promoted. Legacy opt-ins are confined exclusively to compatibility-test paths.
 - `UNRESOLVED_HISTORICAL`: Historical version with unresolved text or Gazette effective date (`uncertainty_window_start`/`end` set). Excluded from dense/sparse index; triggers `temporal_uncertainty` abstention.
 - `BLOCKED_LEGAL_TOPIC`: Critical defect (CMap corruption, unreviewed OCR, failed attestation, jurisdiction violation). Hard-excluded from index; triggers `blocked_legal_topic` abstention.
 
 ### `LifecycleState` (on `LegalProvision` ONLY)
 - `IN_FORCE`, `SUPERSEDED`, `REPEALED`, `ENACTED_PENDING_COMMENCEMENT`, `EFFECTIVE_DATE_UNRESOLVED`, `SUSPENDED_GAP`.
+
+---
 
 ## 2. Backward-Compatible Model Extensions (`src/uae_lexagent/models.py`)
 
@@ -56,27 +58,44 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
   - `human_verification_status: Literal["unreviewed", "extraction_verified", "rejected"] = "unreviewed"`
   - `reviewer_id: str | None = None`
   - `reviewed_at_utc: datetime | None = None`
+- **`BoundaryRegistry` Model:**
+  - `verified_topics: tuple[str, ...]` — Positively certified statutory topics with complete amendment coverage through `system_cutoff`.
+  - `post_cutoff_amendments: dict[str, str]` — Map of topic -> known subsequent statutory instrument enacted after `system_cutoff`.
+  - `coverage_status: Literal["COMPLETE", "INCOMPLETE", "UNKNOWN"]` — Global certification status. If `INCOMPLETE` or `UNKNOWN`, all undated queries fail closed (`abstention_reason="incomplete_amendment_verification"`).
+
+---
 
 ## 3. Legacy Migration Protocol & Temporal Cutoff Governance
 
 ### 3.1 Temporal Cutoff & Current-Law Governance (`effective_as_of_max`)
 1. **Four Temporal Dimensions:**
-   - `release_manifest.built_at_utc`: Generation timestamp of the corpus release artifact.
-   - `release_manifest.effective_as_of_max`: Upper bound statutory date verified against the Official Gazette (e.g. `2024-08-31`).
+   - `release_manifest.built_at_utc`: Generation timestamp of the corpus release artifact (reproducibly derived from `SOURCE_DATE_EPOCH` / git commit date).
+   - `release_manifest.effective_as_of_max`: Upper bound statutory date verified against the Official Gazette (`2024-08-31`).
    - `LegalDocument.last_verified_at_utc` / `LegalProvision.reviewed_at_utc`: Entity-level audit timestamps.
    - `query.as_of`: Query-specified evaluation date.
 2. **Current-Law Query Handling (`query.as_of is None`):**
-   - The engine tentatively binds to `effective_as_of_max`.
-   - **Mandatory Disclosure:** Must include `TEMPORAL_CUTOFF_DISCLOSURE` stating that advice is verified through `effective_as_of_max` and does not assert unverified post-cutoff law.
-   - **Known Amendment Abstention:** If the query topic touches an instrument with post-cutoff amendments registered in the `BoundaryRegistry`, the engine fails closed with `abstention_reason="stale_or_incomplete_amendment_coverage"`.
-   - **Future Date Abstention:** Queries specifying `as_of > effective_as_of_max` strictly fail closed with `abstention_reason="temporal_uncertainty"`.
+   - **Positive Topic Requirement (Closed-World):** The engine checks that the target topic is positively listed in `BoundaryRegistry.verified_topics`. The absence of a registered amendment is NEVER proof of complete coverage.
+   - **Unknown / Incomplete Registry Guard:** If `BoundaryRegistry.coverage_status` is not `COMPLETE`, or topic is uncertified, abstain (`abstention_reason="incomplete_amendment_verification"`).
+   - **Staleness Horizon Guardrail:** If execution date exceeds `system_cutoff` (`2024-08-31`) by > 180 days, the engine MUST fail closed with `abstention_reason="corpus_verification_expired"`. A warning alone **MUST NEVER** authorize a current-law answer. Substantive answers are permitted only for explicit historical queries where `as_of <= system_cutoff`.
+   - **Known Post-Cutoff Amendment Guard:** If topic is in `BoundaryRegistry.post_cutoff_amendments`, fail closed (`abstention_reason="stale_or_incomplete_amendment_coverage"`).
+   - **Mandatory Disclosure:** If eligible, binds tentatively to `effective_as_of_max` (`2024-08-31`) and attaches `TEMPORAL_CUTOFF_DISCLOSURE`.
+3. **Historical Query Handling (`query.as_of is not None`):**
+   - If `query.as_of > effective_as_of_max`: fail closed with `abstention_reason="temporal_uncertainty"`.
+   - If `query.as_of <= effective_as_of_max`: evaluates exact historical state on `as_of`, attaching `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE`.
 
-### 3.2 Legacy Migration Protocol (Zero Automatic Promotion)
+### 3.2 Corpus Fingerprint Definition
+In accordance with `loader.py` and `indexing.py`, `corpus_fingerprint` is **not** a raw text concatenation. It is computed as:
+```python
+records = [provision.model_dump(mode="json") for provision in provisions]
+records.sort(key=lambda record: record["provision_id"])
+payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+    "utf-8"
+)
+corpus_fingerprint = hashlib.sha256(payload).hexdigest()
+```
+This guarantees an exact, multi-field, canonical metadata digest across all provision attributes.
 
-1. Existing Phase 5.1 files (`fdl_33_2021_provisions.json`, `cabinet_resolution_1_2022_provisions.json`, `manifest.json`) load with `publication_state = LEGACY_UNVERIFIED` and `authenticity_tier = LEGACY_UNATTESTED`.
-2. Production retrieval (`allow_legacy_unverified=False`) refuses to serve `LEGACY_UNVERIFIED` records.
-3. Legacy Phase 5.1 unit tests pass via explicit test-fixture opt-in (`allow_legacy_unverified=True`), preserving regression coverage without falsifying provenance.
-4. To migrate any provision to `VERIFIED_PUBLISHABLE` or `PUBLISHED_WITH_CAVEAT`, the offline migration pipeline must: (a) capture official HTML/PDF snapshots with `redistribution_clearance="verified_public_law"`, (b) pass `RV-01`–`RV-11`, (c) record `human_verification_status="extraction_verified"` where required, and (d) emit a new `release_manifest.json`.
+---
 
 ## 4. Unified Validation Rules (`RV-01`–`RV-11`)
 
@@ -89,7 +108,7 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
 | **RV-05** | Temporal Gaps & Uncertainty | Gaps between consecutive versions are permitted ONLY if explicitly modeled as `REPEALED`, `SUSPENDED_GAP` (with `gap_or_repeal_reason`), or `EFFECTIVE_DATE_UNRESOLVED` (with `uncertainty_window_start` & `end`). Unexplained gaps fail. | **RELEASE-BLOCKING** (unexplained) / **QUARANTINE** (`UNRESOLVED_HISTORICAL`) |
 | **RV-06** | Amendment Lineage | Every version with `effective_from > document.effective_from` must reference an `AmendmentEdge` whose `effective_date == effective_from`. | **QUARANTINE** (`UNRESOLVED_HISTORICAL`) |
 | **RV-07** | Document Completeness (Decoupled) | Missing sequential articles set `LegalDocument.completeness = PARTIAL_VERIFIED` and populate `missing_article_numbers`. Does NOT quarantine independently verified sibling provisions. | **REPORTED** in `release_manifest.json` & `validate.py` |
-| **RV-08** | Authoritative Arabic (Art. 66) | Every `VERIFIED_PUBLISHABLE` or `PUBLISHED_WITH_CAVEAT` version MUST have an `ar` record with `is_authoritative=True` and `translation_provenance="authoritative_original"`. | **QUARANTINE** (`BLOCKED_LEGAL_TOPIC`) |
-| **RV-09** | Bilingual Alignment & Triage Honesty | Structural/numeric parity mismatches block `VERIFIED_PUBLISHABLE` (quarantine or AR-only `PUBLISHED_WITH_CAVEAT`). `unavailable_official` EN is valid with `OFFICIAL_EN_UNAVAILABLE` caveat. Automated heuristics set `numeric_consistency_status="pass"` only—never `semantic_equivalence_status="human_reviewed_equivalent"`. | **QUARANTINE** (`BLOCKED_LEGAL_TOPIC` or AR-only caveat) |
+| **RV-08** | Authoritative Arabic (Art. 66) | Every `VERIFIED_PUBLISHABLE` or `PUBLISHED_WITH_CAVEAT` version MUST have an `ar` record with `is_authoritative=True` and `translation_provenance="authoritative_original"`. English can never be authoritative. | **QUARANTINE** (`BLOCKED_LEGAL_TOPIC`) |
+| **RV-09** | Bilingual Alignment & Triage Honesty | Structural/numeric parity mismatches block `VERIFIED_PUBLISHABLE`. Arabic and English provisions in an audit pair MUST belong to the exact same `version_id`. `unavailable_official` EN is valid with `OFFICIAL_EN_UNAVAILABLE` caveat. Automated heuristics set `numeric_consistency_status="pass"` only—never `semantic_equivalence_status="human_reviewed_equivalent"`. | **QUARANTINE** (`BLOCKED_LEGAL_TOPIC` or AR-only caveat) |
 | **RV-10** | Jurisdiction Hygiene | Publishable provisions must have `jurisdiction == Jurisdiction.UAE_ONSHORE`. Zero DIFC/ADGM/domestic-worker provisions permitted. | **RELEASE-BLOCKING** |
-| **RV-11** | Fail-Closed Claim-Key Registry | `claim_key_registry.json` SHA-256 matches `release_manifest.json`; every `approved` entry references existing `logical_provision_id` & `applicable_version_ids` and has `reviewer_id` + `reviewed_at_utc`. Unregistered provisions authorize zero claims. | **RELEASE-BLOCKING** (tamper/orphan) / **FAIL-CLOSED AT RUNTIME** |
+| **RV-11** | Fail-Closed Claim-Key Registry & Clause Binding | `claim_key_registry.json` SHA-256 matches `release_manifest.json`; every `approved` entry references existing `logical_provision_id` & `applicable_version_ids` and has `reviewer_id` + `reviewed_at_utc`. Gratuity threshold `gratuity_entitlement_service_threshold` strictly bound to Article 51(2). Unregistered provisions authorize zero claims. | **RELEASE-BLOCKING** (tamper/orphan) / **FAIL-CLOSED AT RUNTIME** |

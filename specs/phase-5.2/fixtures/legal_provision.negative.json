@@ -1,7 +1,7 @@
 {
-  "provision_id": "PROV_INVALID_JURISDICTION",
-  "document_id": "FDL_33_2021",
-  "source_id": "GOV_UAE_FDL_33_2021_HTML",
+  "provision_id": "SYNTHETIC_TEST_ONLY_PROV_INVALID_JURISDICTION",
+  "document_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021",
+  "source_id": "SYNTHETIC_TEST_ONLY_GOV_UAE_FDL_33_2021_HTML",
   "jurisdiction": "invalid_jurisdiction_name",
   "legal_domain": "employment",
   "article": "51",

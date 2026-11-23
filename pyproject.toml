@@ -16,7 +16,8 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4.0",
     "mypy>=1.10.0",
-    "jsonschema>=4.20.0",
+    "lefthook==2.2.2",
+    "jsonschema[format-nongpl]>=4.23.0",
 ]
 retrieval = [
     "numpy>=1.26.0",

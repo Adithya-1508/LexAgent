@@ -2,16 +2,16 @@
   "schema_version": "5.2.0",
   "entries": [
     {
-      "logical_provision_id": "FDL_33_2021_ART_51_01",
+      "logical_provision_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_51_02",
       "applicable_version_ids": [
-        "FDL_33_2021_ART_51_01@2022-02-02"
+        "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_51_02@2022-02-02"
       ],
       "claim_key": "gratuity_entitlement_service_threshold",
       "subject_obligation": "employer",
       "review_status": "approved",
       "reviewer_id": "LEGAL_REVIEWER_01",
       "reviewed_at_utc": "2026-11-20T10:00:00Z",
-      "rationale": "Authorizes claim regarding 1 full year continuous service requirement for severance eligibility."
+      "rationale": "Authorizes claim regarding 1 full year continuous service requirement for foreign worker full-time severance eligibility under Article 51(2)."
     }
   ]
 }

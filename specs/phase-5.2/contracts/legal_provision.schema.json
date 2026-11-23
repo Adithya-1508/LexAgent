@@ -249,5 +249,161 @@
       "format": "date-time",
       "default": null
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "is_authoritative": {
+            "const": true
+          }
+        },
+        "required": [
+          "is_authoritative"
+        ]
+      },
+      "then": {
+        "properties": {
+          "language": {
+            "const": "ar"
+          },
+          "translation_provenance": {
+            "const": "authoritative_original"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycle_state": {
+            "const": "in_force"
+          }
+        },
+        "required": [
+          "lifecycle_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "effective_from"
+        ],
+        "properties": {
+          "effective_from": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycle_state": {
+            "const": "superseded"
+          }
+        },
+        "required": [
+          "lifecycle_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "effective_from",
+          "effective_until"
+        ],
+        "properties": {
+          "effective_from": {
+            "type": "string",
+            "format": "date"
+          },
+          "effective_until": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "lifecycle_state": {
+            "enum": [
+              "repealed",
+              "suspended_gap"
+            ]
+          }
+        },
+        "required": [
+          "lifecycle_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "gap_or_repeal_reason"
+        ],
+        "properties": {
+          "gap_or_repeal_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "publication_state": {
+            "const": "PUBLISHED_WITH_CAVEAT"
+          }
+        },
+        "required": [
+          "publication_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "caveat_codes": {
+            "type": "array",
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "publication_state": {
+            "const": "VERIFIED_PUBLISHABLE"
+          }
+        },
+        "required": [
+          "publication_state"
+        ]
+      },
+      "then": {
+        "required": [
+          "human_verification_status",
+          "reviewer_id",
+          "reviewed_at_utc"
+        ],
+        "properties": {
+          "human_verification_status": {
+            "const": "extraction_verified"
+          },
+          "reviewer_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reviewed_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cmap_corruption_detected": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
 }

@@ -79,5 +79,80 @@
       "format": "date-time",
       "default": null
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "semantic_equivalence_status": {
+            "enum": [
+              "human_reviewed_equivalent",
+              "human_reviewed_discrepancy"
+            ]
+          }
+        },
+        "required": [
+          "semantic_equivalence_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "reviewer_id",
+          "reviewed_at_utc"
+        ],
+        "properties": {
+          "reviewer_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reviewed_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "structural_alignment_status": {
+            "const": "unaligned_no_official_en"
+          }
+        },
+        "required": [
+          "structural_alignment_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "en_provision_id": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "numeric_consistency_status": {
+            "const": "mismatch_flagged"
+          }
+        },
+        "required": [
+          "numeric_consistency_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "discrepancy_notes"
+        ],
+        "properties": {
+          "discrepancy_notes": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
 }

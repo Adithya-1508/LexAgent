@@ -34,3 +34,62 @@ This document records all structured self-review passes, Review Round 1 findings
 3. **Claim-Level Legal Evidence Table:** Added comprehensive evidence matrix in `M5.2.0_Legal_Source_Verification.md` with explicit URLs, verbatim captured facts, verification dates, and access limitations. Gated upstream PDFs explicitly marked `UNRETRIEVED_UPSTREAM_PDF_GATE` rather than falsely claiming independent verification.
 4. **Document Harmonization:** Reconciled coverage dates (2024-08-31 cutoff, 74 and 39 articles), publication defaults, and quarantine rules across all 17 planning package files and 5 baseline validation reports.
 5. **CodeRabbit Status Separation:** Recorded external third-party CodeRabbit app status (`Review rate limited`) separately from the 11 passing internal GitHub Actions CI workflow jobs.
+
+## 5. PR #2 Independent Codex BLOCK Remediation Pass (Planning Baseline Scope)
+
+In response to independent Codex review findings on PR #2 at `56c2b21`, the planning baseline was comprehensively hardened strictly within specification, schema, and fixture artifacts (zero production runtime code modified):
+
+1. **Git Integration & Conflict Reproduction (MEDIUM):**
+   - Inspected `origin/main` (`913fb6b`), containing merged PR #3 tooling baseline (`lefthook==2.2.2`).
+   - Reproduced merge conflict on `dev` dependencies in `pyproject.toml` (`lefthook==2.2.2` vs `jsonschema>=4.20.0`).
+   - Resolved cleanly by combining both: pinned `lefthook==2.2.2` and updated JSON Schema to `jsonschema[format-nongpl]>=4.23.0`.
+   - Preserved all 11 existing CI workflow jobs and left `src/uae_lexagent/` untouched.
+
+2. **Official Legal-Source Verification (HIGH):**
+   - **FDL 20/2023:** Verified enactment 2023-09-13, Gazette 759 (2023-09-28), commencement 2024-01-01 per Art. 2. Summary MoHRE decisions <= AED 50k appealed to Court of Appeal within **15 working days** (*خمسة عشر يوم عمل*); court delivers judgment within 15 working days; 1-year limitation from right due date. Official standalone English translation confirmed unavailable on federal portal; MoHRE-hosted English translation is strictly informational convenience and legally non-authoritative (Arabic text is sole authority per Art 66(2)).
+   - **FDL 9/2024:** Verified enactment 2024-07-29, Gazette 780 (2024-07-31), commencement 2024-08-31 per Art. 4 (after 30 days from publication). Articles 1–4 verified: Art. 1 replaces Art. 54 (appeal venue to Court of First Instance within 15 working days, 2-year limitation from termination) and Art. 60 (fines up to AED 1M); Art. 2 mandates transfer of pending Court of Appeal cases without fees except decided/reserved matters; Art. 3 repeals contrary provisions; Art. 4 governs publication and 30-day commencement.
+   - **Cabinet Resolution 1/2022:** Resolved discrepancy between 17 January 2022 and 3 February 2022 using primary sources: formally enacted/issued **3 February 2022** (2 Rajab 1443 AH) by the Vice President and Prime Minister per `uaelegislation.gov.ae`; 17 January 2022 was preliminary Cabinet session approval / press announcement. Published in Gazette 721 dated 2022-02-15, in force 2022-02-02 per Art. 39. Exactly 39 articles (1 ingested in baseline, 38 uningested). Primary metadata reconciled in `data/official_sources/cabinet_resolution_1_2022_document.json` (`issued_date: 2022-02-03`).
+   - **Statutory Clause-Level Binding (Article 51(1) vs 51(2)):** Disentangled Article 51(1) (UAE National Worker pensions/GPSSA) from Article 51(2) (foreign full-time worker end-of-service gratuity formula and 1-year service threshold). Corrected fixtures and claim registry to bind gratuity entitlement strictly to `ART_51_02`.
+
+3. **Fail-Closed Current-Law Contract & Freshness Horizon (HIGH):**
+   - **Positive Topic Coverage Principle:** Absence of an amending decree is not proof of completeness (anti-open-world). Topics with unknown or incomplete coverage in `BoundaryRegistry` fail closed with `stale_or_incomplete_amendment_coverage`.
+   - **Freshness Horizon Clock & Fail-Closed Current-Law Rule:** If runtime execution clock exceeds 180 days past cutoff (`execution_time > system_cutoff + 180 days`), all current-law queries (undated or `as_of` resolving to `system_cutoff`) MUST FAIL CLOSED and ABSTAIN (`abstention_reason="corpus_verification_expired"`). A warning alone **MUST NEVER** authorize a current-law answer. Substantive answers are permitted strictly for explicit historical queries where `as_of <= system_cutoff` with verified topic coverage.
+   - **Four-Stage Enforcement:** Pre-retrieval routing, retrieval filters/tools, synthesis verifier, and agent output packaging.
+   - **Dual-Path Propagation:** Caveat disclosures propagate through both `GroundedLegalAnswer.caveat_disclosures` and `LegalResponse.caveat_disclosures`.
+   - **Historical Answer Overrides:** Retrospective queries for repealed provisions attach `HISTORICAL_ANSWER_CAVEAT`.
+
+4. **Mandatory JSON Schema Validation (HIGH):**
+   - Removed silent `pytest.importorskip("jsonschema")` in favor of direct import, eliminating risk of false green CI builds.
+   - Pinned `jsonschema[format-nongpl]>=4.23.0` in dev dependencies, providing `rfc3339-validator` and `rfc3986-validator`.
+   - Attached `format_checker=Draft202012Validator.FORMAT_CHECKER` to schema tests.
+   - Expanded `tests/test_phase_5_2_schemas.py` to 57 independent unit tests covering missing required fields, invalid enums, extra properties rejection, malformed URIs, malformed datetimes, and conditional logic.
+
+5. **Synthetic Fixtures & Provenance (HIGH):**
+   - Marked all 14 schema fixtures as `SYNTHETIC_TEST_ONLY_...` to avoid confusing test payloads with real statutory records.
+   - Replaced empty string SHA-256 (`e3b0c442...`) in source snapshot with real calculated digest of known nonempty synthetic bytes (`0f8ca430...`).
+   - Replaced release manifest empty digest with real calculated SHA-256 (`4676bd2c...`).
+   - Explicitly separated operator custody attestation from automated government authentication.
+
+6. **Schema-to-Model Consistency (MEDIUM):**
+   - Implemented Draft 2020-12 `allOf`/`if`/`then` conditionals across all 7 schemas:
+     - `source_snapshot.schema.json`: Derived text requires lineage and extraction tool/version; manual tiers require attestation ID; automated TLS requires TLS cert fingerprint.
+     - `manual_attestation.schema.json`: Operator-only corroboration requires `independent_cross_check_passed: false`.
+     - `legal_provision.schema.json`: Arabic primacy (`is_authoritative: true` requires `language: "ar"` and `translation_provenance: "authoritative_original"`); `in_force` requires `effective_from`; `superseded` requires both `effective_from` and `effective_until`; `repealed`/`suspended_gap` requires reason; caveats require non-empty codes; verified publishable requires reviewer details.
+     - `amendment_edge.schema.json`: `replaces`/`amends` requires both prior and new version IDs; `repeals` requires prior ID and `new_version_id: null`; `adds` requires `prior_version_id: null` and new ID.
+     - `bilingual_alignment_audit.schema.json`: Reviewed status requires reviewer ID and timestamp; unaligned EN requires `en_provision_id: null`.
+
+7. **Retrieval Migration & Release Sequencing (MEDIUM):**
+   - Specified hybrid retrieval pipeline: BM25 keyword search, dense vector embeddings, candidate version pruning prior to Reciprocal Rank Fusion (RRF), same-version bilingual alignment collapsing, and version-scoped citation mapping.
+   - Mandated that the future Phase 5.2 release pipeline enforce offline release manifest verification (`RV-01`–`RV-11` scheduled for M5.2.3) before corpus publication and tagging, alongside the existing corpus integrity checker (`python -m uae_lexagent.evaluation.validate`).
+   - Positioned release manifest and approved registry inputs prior to downstream index consumption.
+   - Supported `SOURCE_DATE_EPOCH` for reproducible build timestamps.
+
+8. **Compatibility Matrix Exact Test Inventory (MEDIUM):**
+   - Regenerated exact test inventory from actual pytest collection across 9 files (145 baseline tests: 118 Tier 1 Unchanged, 22 Tier 2 Opt-In, 5 Tier 3 Upgraded, 0 Failures).
+   - Reconciled exact test node IDs in `tests/test_models.py` (replacing placeholder names with actual names) and `tests/test_agent.py` (restoring omitted `test_unverified_answer_never_leaks_unsupported_text`).
+   - Corrected fingerprint definition to canonical JSON serialization of sorted provisions hashed with SHA-256.
+
+9. **Implementation Readiness & Full Output Disclosure (MEDIUM):**
+   - Updated readiness and validation reports to 57 schema tests and 202 total tests.
+   - Inserted full, unclipped output of `validate.py`, explicitly disclosing the 4 unretrieved upstream raw PDF snapshots and 61 uningested articles of FDL 33/2021.
+   - Documented Cabinet Resolution 1/2022's full 39-article scope (1 ingested, 38 uningested).

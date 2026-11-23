@@ -142,5 +142,89 @@
       ],
       "default": "pending_review"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "derived_text"
+          }
+        },
+        "required": [
+          "artifact_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "derived_from_source_id",
+          "extraction_tool",
+          "extraction_version"
+        ],
+        "properties": {
+          "derived_from_source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extraction_tool": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extraction_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "authenticity_tier": {
+            "enum": [
+              "OPERATOR_ATTESTED_ONLY",
+              "GOV_INDEPENDENTLY_CORROBORATED"
+            ]
+          }
+        },
+        "required": [
+          "authenticity_tier"
+        ]
+      },
+      "then": {
+        "required": [
+          "attestation_id"
+        ],
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "authenticity_tier": {
+            "const": "GOV_AUTOMATED_TLS_VERIFIED"
+          }
+        },
+        "required": [
+          "authenticity_tier"
+        ]
+      },
+      "then": {
+        "required": [
+          "tls_cert_fingerprint"
+        ],
+        "properties": {
+          "tls_cert_fingerprint": {
+            "type": "string",
+            "pattern": "^SHA256:[a-fA-F0-9]{64}$"
+          }
+        }
+      }
+    }
+  ]
 }
