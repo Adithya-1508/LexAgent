@@ -225,6 +225,25 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "is_authoritative": {
+            "const": true
+          }
+        },
+        "required": [
+          "is_authoritative"
+        ]
+      },
+      "then": {
+        "properties": {
+          "language": {
+            "const": "ar"
+          }
+        }
+      }
     }
   ]
 }

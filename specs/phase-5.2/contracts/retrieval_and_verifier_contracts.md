@@ -69,7 +69,9 @@ When evaluating a query, the system evaluates safety gates in the following stri
 flowchart TD
     Q[Incoming Query] --> C0{query.as_of Provided?}
     C0 -- Yes: as_of > system_cutoff --> A1[ABSTAIN: temporal_uncertainty]
-    C0 -- Yes: as_of <= system_cutoff --> H1[Historical Query: resolved_as_of = query.as_of]
+    C0 -- Yes: as_of <= system_cutoff --> C0B{Positive Historical Topic Coverage Certified in BoundaryRegistry?}
+    C0B -- No / Incomplete / Unknown / Contradictory --> A1B[ABSTAIN: unverified_historical_topic_coverage]
+    C0B -- Yes: Affirmatively Certified --> H1[Historical Query: resolved_as_of = query.as_of]
     C0 -- No: Current-Law / Undated Query --> C1{Wall-Clock Staleness > 180d?}
     C1 -- Yes: Freshness Horizon Expired --> A2[ABSTAIN: corpus_verification_expired]
     C1 -- No: Within 180d Horizon --> C2{Positive Topic Certified in BoundaryRegistry?}
@@ -85,7 +87,10 @@ flowchart TD
 1. **Gate 1: Query Intent & Explicit Historical vs. Current-Law Resolution:**
    - **Explicit Historical Date (`query.as_of is not None`):**
      - If `query.as_of > system_cutoff`: **Fail closed immediately** with `abstention_reason="temporal_uncertainty"` (the system refuses to extrapolate future law).
-     - If `query.as_of <= system_cutoff`: `resolved_as_of = query.as_of`. The answer is governed by historical status; system attaches `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE`.
+     - If `query.as_of <= system_cutoff`:
+       - **Gate 1B (Affirmative Historical Coverage Certification):** The queried statutory topic/article MUST be affirmatively certified in `BoundaryRegistry.verified_topics` as having complete, verified historical coverage spanning `query.as_of`.
+       - *Strict Coverage Invariant:* Matching an existing historical provision version in the corpus is **strictly insufficient by itself**. If historical coverage for that topic at `query.as_of` is uncertified, missing, marked `UNKNOWN`, `INCOMPLETE`, or contradictory, the system **MUST FAIL CLOSED AND ABSTAIN** with `abstention_reason="unverified_historical_topic_coverage"`.
+       - Only when positive historical coverage is certified does `resolved_as_of = query.as_of`. The answer is governed by historical status; system attaches `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE`. Explicit historical queries are exempt from the 180-day wall-clock execution limit, but remain strictly contingent upon verified historical topic coverage.
    - **Current-Law / Undated Query (`query.as_of is None`):**
      - The query seeks the current state of UAE employment law.
      - Must pass Gates 2, 3, and 4 before any substantive answer may be generated.
@@ -98,7 +103,7 @@ flowchart TD
        `abstention_reason="corpus_verification_expired"`.
      - *No bypass permitted:* Emitting substantive legal advice about "current law" when the knowledge horizon has expired violates legal safety, as subsequent unindexed amendments may have altered or repealed statutory obligations.
 
-3. **Gate 3: Positive Topic Coverage & BoundaryRegistry Check:**
+3. **Gate 3: Positive Topic Coverage & BoundaryRegistry Check (Current Law):**
    - The query's target topic/article must be positively listed in `BoundaryRegistry.verified_topics`.
    - If the topic is unlisted, marked `UNKNOWN`, or if `BoundaryRegistry.coverage_status != COMPLETE`, the system **MUST FAIL CLOSED AND ABSTAIN** with:
      `abstention_reason="incomplete_amendment_verification"`.
@@ -115,11 +120,18 @@ flowchart TD
      - Select eligible versions where `(effective_from is None or effective_from <= resolved_as_of)` AND `(effective_until is None or resolved_as_of <= effective_until)` AND `lifecycle_state in {IN_FORCE, SUPERSEDED}`.
      - Enforce cardinality: `count == 0` -> excluded; `count == 1` -> selected; `count > 1` -> fail closed with `abstention_reason="ambiguous_temporal_overlap"`.
 
-6. **Step 6: Pending-Case Transitional Handling (FDL 9/2024 Art. 2):**
-   - For dispute procedure queries touching Article 54 where the underlying dispute was instituted prior to 31 August 2024:
-     - The engine MUST evaluate the transitional rule: lawsuits and applications filed before the Court of Appeal prior to 31 August 2024 are transferred without judicial fees to the Court of First Instance.
-     - **Mandatory Transition Exception:** If a judgment was already rendered or the lawsuit was reserved for judgment (*المحكوم فيها أو المحجوزة للحكم*), the lawsuit remains before the Court of Appeal.
-     - The system attaches `PENDING_CASE_TRANSITION_DISCLOSURE` to the response disclosures.
+6. **Step 6: Pending-Case Transitional Handling (FDL 9/2024 Art. 2 Operative Contract):**
+   - For dispute procedure queries touching Article 54, the engine MUST evaluate all five discrete legal conditions before determining appellate or trial venue:
+     - **Condition 1 (Substantive Scope):** Does the matter arise under Article 54(3) of FDL 33/2021 (disputes involving MoHRE summary decisions for claims <= AED 50,000, or unresolved referrals)? If no, Article 2 does not apply.
+     - **Condition 2 (Operative Benchmark Date):** The statutory transition benchmark is the commencement date of FDL 9/2024: **31 August 2024**.
+     - **Condition 3 (Appellate Court Pendency):** Was the lawsuit or application pending before the Court of Appeal (*محكمة الاستئناف*) as of 31 August 2024?
+     - **Condition 4 (Decided Exception):** Has the lawsuit already been decided (*محكوم فيها*) by the Court of Appeal prior to 31 August 2024? If yes, it is excluded from transfer; the Court of Appeal judgment stands.
+     - **Condition 5 (Reserved for Judgment Exception):** Has the lawsuit been reserved for judgment (*محجوزة للحكم*) by the Court of Appeal prior to 31 August 2024? If yes, it is excluded from transfer; jurisdiction remains with the Court of Appeal to render judgment.
+   - **Operative Procedural Rule:**
+     - If Conditions 1 and 3 are met, and Conditions 4 and 5 are NOT met: The Court of Appeal transfers the lawsuit *ex officio* (*تحيل محاكم الاستئناف من تلقاء نفسها*) without judicial fees to the Court of First Instance (*المحكمة الابتدائية*), and the Court of First Instance hears the matter. System attaches `PENDING_CASE_TRANSITION_DISCLOSURE`.
+     - If Conditions 4 or 5 are met: Jurisdiction remains with the Court of Appeal; no transfer occurs.
+     - If historical query where `as_of < 2024-08-31` (e.g. dispute between 2024-01-01 and 2024-08-30): Governed by FDL 20/2023 (appealed to Court of Appeal within 15 working days; court decides within 15 working days).
+     - **Strict Procedural Fact-Sufficiency Rule:** The engine **MUST NEVER** infer court selection from filing date alone. If required procedural facts (such as whether the appeal was reserved for judgment, decided, or arose under Art. 54(3)) are absent or ambiguous, the engine **MUST FAIL CLOSED AND ABSTAIN** with `abstention_reason="missing_procedural_facts"` or request user clarification.
 
 7. **Step 7: Mandatory Temporal Cutoff Disclosure:**
    - All undated answers MUST attach `TEMPORAL_CUTOFF_DISCLOSURE`:
@@ -128,25 +140,28 @@ flowchart TD
 
 ---
 
-## 4. Multi-Stage Enforcement Architecture
+## 4. Multi-Stage Enforcement Architecture Across Actual Repository Modules
 
-Temporal and coverage validation is enforced across four distinct system checkpoints:
+Temporal, boundary, and coverage validation is enforced across four discrete system checkpoints across actual repository modules:
 
-1. **Pre-Retrieval Stage (`RetrievalFilters` & Query Validator):**
-   - Validates jurisdiction boundaries, rejects DIFC/ADGM traps, checks the 180-day freshness horizon clock, and checks `BoundaryRegistry` positive topic coverage.
-2. **Statutory Tool Execution Stage (`tools.py`):**
-   - Statutory calculation tools (e.g. `calculate_gratuity`, `evaluate_dispute_timeline`) validate `as_of` dates. If an input date exceeds `system_cutoff`, tools fail closed or return `temporal_uncertainty` rather than computing ungrounded results.
-3. **Synthesis & Verification Stage (`CitationVerifier`):**
-   - Verifies all cited `version_id`s against `claim_key_registry.json`.
-   - Ensures that all required caveat codes (e.g. `STATUTORY_INTERACTION_CR_96_2023`, `TEMPORAL_CUTOFF_DISCLOSURE`, `PENDING_CASE_TRANSITION_DISCLOSURE`) are present in `GroundedLegalAnswer.caveat_disclosures` and visibly rendered in `full_text`.
-4. **Agent Orchestration & Publication Stage (`graph.py` / `LegalResponse`):**
-   - Guarantees full disclosure propagation from `GroundedLegalAnswer` to `LegalResponse`.
-   - `LegalResponse.caveat_disclosures` mirrors `GroundedLegalAnswer.caveat_disclosures`.
-   - If an abstention was triggered at any stage, the agent emits an uncompromised `LegalResponse` with `is_answered=False` and the exact `abstention_reason`.
+1. **Pre-Retrieval Stage (`src/uae_lexagent/routing.py`, `src/uae_lexagent/agent/router.py`, `src/uae_lexagent/retrieval/contracts.py`):**
+   - Validates jurisdiction boundaries, rejects DIFC/ADGM traps, checks the 180-day freshness horizon clock on current-law queries, checks `BoundaryRegistry` positive topic coverage (for current law and historical dates), and flags required procedural facts for Article 54 disputes.
+2. **Statutory Tool Execution Stage (`src/uae_lexagent/tools.py`):**
+   - Statutory calculation tools (e.g. `calculate_gratuity`, `evaluate_dispute_timeline`) validate `as_of` dates. If an input date exceeds `system_cutoff` or targets an unverified historical topic, tools fail closed with `temporal_uncertainty` rather than computing ungrounded results.
+3. **Retrieval & Fusion Execution Stage (`src/uae_lexagent/retrieval/`):**
+   - Enforced identically across standalone baseline retrieval (`src/uae_lexagent/retrieval/baseline.py`), dense search (`src/uae_lexagent/retrieval/dense.py`), sparse BM25 search (`src/uae_lexagent/retrieval/sparse.py`), hybrid fusion (`src/uae_lexagent/retrieval/hybrid.py`, `src/uae_lexagent/retrieval/fusion.py`), and multi-version index management (`src/uae_lexagent/retrieval/indexing.py`).
+   - Candidate versions are pruned prior to Reciprocal Rank Fusion; same-version bilingual alignment collapsing is enforced.
+4. **Synthesis & Verification Stage (`src/uae_lexagent/synthesis/engine.py`, `src/uae_lexagent/synthesis/verifier.py`):**
+   - **Universal Evidence Provenance & Eligibility Gate:** Evidence passed to `SynthesisEngine.synthesize()`—whether obtained from internal retrieval or supplied directly by the caller—MUST pass the exact same provenance verification, publication-state check (`VERIFIED_PUBLISHABLE` by default, or `PUBLISHED_WITH_CAVEAT` with caller opt-in), and version-scoped claim authorization. Unverified caller evidence fails closed.
+   - `CitationVerifier` verifies all cited `version_id`s against checksummed `data/official_sources/claim_key_registry.json`.
+   - Verifies that all required caveat codes (e.g. `STATUTORY_INTERACTION_CR_96_2023`, `TEMPORAL_CUTOFF_DISCLOSURE`, `PENDING_CASE_TRANSITION_DISCLOSURE`, `HISTORICAL_ANSWER_CAVEAT`) are present in `GroundedLegalAnswer.caveat_disclosures` and rendered in `full_text`.
+5. **Agent Orchestration & Publication Stage (`src/uae_lexagent/agent/nodes.py`, `src/uae_lexagent/agent/graph.py`, `src/uae_lexagent/agent/orchestrator.py`):**
+   - Guarantees full dual-path disclosure propagation: `LegalResponse.caveat_disclosures` mirrors `GroundedLegalAnswer.caveat_disclosures`.
+   - If an abstention was triggered at any stage, `retrieval_node`, `synthesis_node`, or `router_node` emits an uncompromised `LegalResponse` with `is_answered=False` and the exact `abstention_reason`.
 
 ---
 
-## 5. Fail-Closed `CitationVerifier` & Claim-Key Registry Contract (`synthesis/verifier.py`)
+## 5. Fail-Closed `CitationVerifier` & Claim-Key Registry Contract (`src/uae_lexagent/synthesis/verifier.py`)
 
 ### Data-Driven Claim-Key Registry (`data/official_sources/claim_key_registry.json`)
 - Replaces hardcoded `_ALIGNMENT_CLAIM_KEYS`.
@@ -164,14 +179,19 @@ The following deterministic regression cases are specified for Phase 5.2 validat
 
 | Test ID | Test Scenario | Input Conditions | Expected Outcome | Enforcing Module |
 |---|---|---|---|---|
-| **REG-TEMPORAL-01** | Future Date Rejection | `as_of = 2026-01-01` (> `2024-08-31`) | Fail closed: `abstention_reason="temporal_uncertainty"` | `RetrievalFilters`, `Indexing` |
-| **REG-TEMPORAL-02** | 180-Day Freshness Expiration (Current Law) | Wall-clock `now() > system_cutoff + 180d`, undated/current-law query | Fail closed: `abstention_reason="corpus_verification_expired"`; warning alone never authorizes current-law answer | `RetrievalIndex`, `Agent` |
-| **REG-TEMPORAL-03** | Historical Query Past 180-Day Horizon | Wall-clock `now() > system_cutoff + 180d`, explicit historical query (`as_of = 2024-05-01` <= `system_cutoff`) | Query succeeds as retrospective answer; `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE` attached | `CitationVerifier`, `LegalResponse` |
-| **REG-TEMPORAL-04** | Positive Coverage Enforcement | Undated query on topic missing from `BoundaryRegistry.verified_topics` | Fail closed: `abstention_reason="incomplete_amendment_verification"` | `RetrievalFilters` |
-| **REG-TEMPORAL-05** | Stale Post-Cutoff Amendment | Undated query on topic in `BoundaryRegistry.post_cutoff_amendments` | Fail closed: `abstention_reason="stale_or_incomplete_amendment_coverage"` | `RetrievalFilters` |
-| **REG-TEMPORAL-06** | Mandatory Cutoff Disclosure | Undated query on positively verified topic (Art. 54) | Output contains `TEMPORAL_CUTOFF_DISCLOSURE`; missing triggers verifier failure | `CitationVerifier`, `LegalResponse` |
-| **REG-TEMPORAL-07** | Historical Version Isolation | Query `as_of = 2024-03-15` for Article 54 | Retrieves FDL 20/2023 version (Court of Appeal); rejects 2024 version | `RetrievalIndex` |
-| **REG-TRANSITION-01** | Pending-Case Transition Advice | Dispute query with filing date `2024-05-01` | Explains referral to Court of First Instance without fees; notes exception for decided matters | `CitationVerifier`, `LegalResponse` |
-| **REG-TRANSITION-02** | Decided Case Exception | Dispute query where judgment was rendered prior to 2024-08-31 | Identifies exception: case remains before Court of Appeal | `CitationVerifier`, `LegalResponse` |
-| **REG-CLAIM-01** | Art 51 Clause Binding Invariant | Claim `gratuity_entitlement_service_threshold` citing Art 51(1) | Fails closed as `UNVERIFIED`: claim key not authorized for Art 51(1) | `CitationVerifier` |
-| **REG-CLAIM-02** | Art 51 Clause 2 Approval | Claim `gratuity_entitlement_service_threshold` citing Art 51(2) | Verifies cleanly; enforces `STATUTORY_INTERACTION_CR_96_2023` caveat | `CitationVerifier` |
+| **REG-TEMPORAL-01** | Future Date Rejection | `as_of = 2026-01-01` (> `2024-08-31`) | Fail closed: `abstention_reason="temporal_uncertainty"` | `retrieval/contracts.py`, `retrieval/indexing.py` |
+| **REG-TEMPORAL-02** | 180-Day Freshness Expiration (Current Law) | Wall-clock `now() > system_cutoff + 180d`, undated/current-law query | Fail closed: `abstention_reason="corpus_verification_expired"`; warning alone never authorizes current-law answer | `retrieval/indexing.py`, `agent/nodes.py` |
+| **REG-TEMPORAL-03** | Verified Historical Query Past 180-Day Horizon | Wall-clock `now() > system_cutoff + 180d`, explicit historical query (`as_of = 2024-05-01` <= `system_cutoff`) with verified topic coverage | Query succeeds as retrospective answer; `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE` attached | `synthesis/verifier.py`, `agent/nodes.py` |
+| **REG-TEMPORAL-04** | Provision Present but Historical Coverage Uncertified | Explicit historical query (`as_of = 2022-06-01`); matching provision exists in corpus, but topic coverage in `BoundaryRegistry` is uncertified (`UNKNOWN` or unlisted) | Fail closed: `abstention_reason="unverified_historical_topic_coverage"`; interval match alone is rejected | `retrieval/contracts.py`, `retrieval/hybrid.py` |
+| **REG-TEMPORAL-05** | Positive Coverage Enforcement (Current Law) | Undated query on topic missing from `BoundaryRegistry.verified_topics` | Fail closed: `abstention_reason="incomplete_amendment_verification"` | `retrieval/contracts.py`, `agent/router.py` |
+| **REG-TEMPORAL-06** | Stale Post-Cutoff Amendment | Undated query on topic in `BoundaryRegistry.post_cutoff_amendments` | Fail closed: `abstention_reason="stale_or_incomplete_amendment_coverage"` | `retrieval/contracts.py` |
+| **REG-TEMPORAL-07** | Mandatory Cutoff Disclosure | Undated query on positively verified topic (Art. 54) | Output contains `TEMPORAL_CUTOFF_DISCLOSURE`; missing triggers verifier failure | `synthesis/verifier.py`, `agent/nodes.py` |
+| **REG-TEMPORAL-08** | Historical Version Isolation | Query `as_of = 2024-03-15` for Article 54 | Retrieves FDL 20/2023 version (Court of Appeal); rejects 2024 version | `retrieval/indexing.py` |
+| **REG-TRANSITION-01** | Qualifying Pending Lawsuit Transferred | Matter under Art. 54(3) pending before Court of Appeal on 31 Aug 2024, not decided, not reserved for judgment | Transferred *ex officio* to Court of First Instance without fees; `PENDING_CASE_TRANSITION_DISCLOSURE` attached | `synthesis/verifier.py`, `agent/nodes.py` |
+| **REG-TRANSITION-02** | Decided Case Exception | Matter under Art. 54(3) where judgment was rendered by Court of Appeal prior to 31 Aug 2024 | Exception applies: decision remains under Court of Appeal; no transfer | `synthesis/verifier.py`, `agent/nodes.py` |
+| **REG-TRANSITION-03** | Reserved-for-Judgment Case Exception | Matter under Art. 54(3) reserved for judgment before Court of Appeal on 31 Aug 2024 | Exception applies: remains before Court of Appeal to render judgment; no transfer | `synthesis/verifier.py`, `agent/nodes.py` |
+| **REG-TRANSITION-04** | Unrelated Appeal Inapplicability | Appellate dispute not arising under Article 54(3) summary MoHRE decisions | Transition rule of Art. 2 does not apply; ordinary appellate rules apply | `retrieval/contracts.py`, `synthesis/verifier.py` |
+| **REG-TRANSITION-05** | Historical Dispute Pre-Commencement | Dispute query evaluated as of `as_of = 2024-05-01` | Governed by FDL 20/2023: appealed to Court of Appeal within 15 working days; court decides within 15 working days | `retrieval/contracts.py`, `synthesis/verifier.py` |
+| **REG-TRANSITION-06** | Ambiguous Procedural Facts Abstention | Case filed before Court of Appeal in June 2024, but procedural status (decided/reserved) is omitted | Engine refuses to infer court; fails closed with `abstention_reason="missing_procedural_facts"` or requests clarification | `agent/router.py`, `agent/nodes.py` |
+| **REG-CLAIM-01** | Art 51 Clause Binding Invariant | Claim `gratuity_entitlement_service_threshold` citing Art 51(1) | Fails closed as `UNVERIFIED`: claim key not authorized for Art 51(1) | `synthesis/verifier.py` |
+| **REG-CLAIM-02** | Art 51 Clause 2 Approval | Claim `gratuity_entitlement_service_threshold` citing Art 51(2) | Verifies cleanly; enforces `STATUTORY_INTERACTION_CR_96_2023` caveat | `synthesis/verifier.py` |

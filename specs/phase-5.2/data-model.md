@@ -15,10 +15,10 @@
 - `UNINGESTED`: Registered in Boundary Registry or target list; zero provisions ingested.
 
 ### `PublicationState` (on `LegalProvision` ONLY)
-- `VERIFIED_PUBLISHABLE`: Passes `RV-01`–`RV-11` with `GOV_AUTOMATED_TLS_VERIFIED` or `GOV_INDEPENDENTLY_CORROBORATED` authenticity and no active caveats. Served by default in ordinary retrieval.
+- `VERIFIED_PUBLISHABLE`: Passes `RV-01`–`RV-11` with `GOV_AUTOMATED_TLS_VERIFIED` or `GOV_INDEPENDENTLY_CORROBORATED` authenticity and zero active caveats (`caveat_codes == []`). Active caveats (blocking or non-blocking) strictly cannot coexist with `VERIFIED_PUBLISHABLE`. Served by default in ordinary retrieval.
 - `PUBLISHED_WITH_CAVEAT`: Authoritative text verified, but carries >=1 mandatory `caveat_codes` (e.g., `STATUTORY_INTERACTION_CR_96_2023`, `OFFICIAL_EN_UNAVAILABLE`, `OPERATOR_ATTESTED_SOURCE_ONLY`). Excluded from ordinary retrieval by default (`include_caveated=False`); requires explicit opt-in and disclosure enforcement.
 - `LEGACY_UNVERIFIED`: **Default** for Phase 5.1 records loaded without Phase 5.2 migration. Excluded from ordinary retrieval by default (`allow_legacy_unverified=False`). Never auto-promoted. Legacy opt-ins are confined exclusively to compatibility-test paths.
-- `UNRESOLVED_HISTORICAL`: Historical version with unresolved text or Gazette effective date (`uncertainty_window_start`/`end` set). Excluded from dense/sparse index; triggers `temporal_uncertainty` abstention.
+- `UNRESOLVED_HISTORICAL`: Historical version with unresolved text or Gazette effective date; strictly requires explicit uncertainty boundary bounds (`uncertainty_window_start` and `uncertainty_window_end`) for safe quarantine. Excluded from date-specific retrieval within that window; triggers `temporal_uncertainty` abstention.
 - `BLOCKED_LEGAL_TOPIC`: Critical defect (CMap corruption, unreviewed OCR, failed attestation, jurisdiction violation). Hard-excluded from index; triggers `blocked_legal_topic` abstention.
 
 ### `LifecycleState` (on `LegalProvision` ONLY)
@@ -81,10 +81,14 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
    - **Mandatory Disclosure:** If eligible, binds tentatively to `effective_as_of_max` (`2024-08-31`) and attaches `TEMPORAL_CUTOFF_DISCLOSURE`.
 3. **Historical Query Handling (`query.as_of is not None`):**
    - If `query.as_of > effective_as_of_max`: fail closed with `abstention_reason="temporal_uncertainty"`.
-   - If `query.as_of <= effective_as_of_max`: evaluates exact historical state on `as_of`, attaching `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE`.
+   - If `query.as_of <= effective_as_of_max`:
+     * **Affirmative Historical Coverage Requirement:** The queried topic MUST be certified in `BoundaryRegistry.verified_topics` as having complete verified historical coverage up to `query.as_of`.
+     * If historical topic coverage is uncertified, missing, `UNKNOWN`, `INCOMPLETE`, or contradictory, the engine MUST fail closed and abstain (`abstention_reason="unverified_historical_topic_coverage"`). Merely matching an existing historical provision in the corpus is strictly insufficient.
+     * Only if affirmatively certified, evaluates exact historical version on `as_of`, attaching `HISTORICAL_ANSWER_CAVEAT` and `TEMPORAL_CUTOFF_DISCLOSURE`.
 
-### 3.2 Corpus Fingerprint Definition
-In accordance with `loader.py` and `indexing.py`, `corpus_fingerprint` is **not** a raw text concatenation. It is computed as:
+### 3.2 Canonical Corpus Fingerprint vs. Release Manifest Digest
+To prevent semantic conflation between corpus content integrity and manifest file metadata:
+1. **Canonical Corpus Fingerprint (`canonical_corpus_fingerprint`):** Defined strictly per `loader.py` and `indexing.py` as the deterministic SHA-256 digest of canonical JSON serialization of all sorted `LegalProvision` records:
 ```python
 records = [provision.model_dump(mode="json") for provision in provisions]
 records.sort(key=lambda record: record["provision_id"])
@@ -93,7 +97,12 @@ payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",
 )
 corpus_fingerprint = hashlib.sha256(payload).hexdigest()
 ```
-This guarantees an exact, multi-field, canonical metadata digest across all provision attributes.
+2. **Release Manifest Digest (`release_manifest_digest`):** Defined separately as the direct SHA-256 digest of `release_manifest.json` on disk, binding all document artifact checksums, claim-key registry checksums, and publication ledgers.
+
+### 3.3 Synthetic Fixture Integrity & Non-Publication Isolation
+Synthetic fixtures in `specs/phase-5.2/fixtures/` carry `SYNTHETIC_TEST_ONLY_...` identifiers and `release_version: "5.2.0-synthetic-test.1"`.
+- **Shape-Only Classification:** Fixture hash values and simulated TLS cert fingerprints in test fixtures are classified strictly as shape-only unit-testing data with zero claim of official government origin or production integrity.
+- **Strict Publication Isolation:** Synthetic fixtures are prohibited from ever being accepted as release verification evidence or published into production indices. Simulated government source acquisitions are strictly test doubles, never real verified provenance.
 
 ---
 

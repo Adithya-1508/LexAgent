@@ -134,6 +134,52 @@
     {
       "if": {
         "properties": {
+          "structural_alignment_status": {
+            "const": "exact_match"
+          }
+        },
+        "required": [
+          "structural_alignment_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "en_provision_id"
+        ],
+        "properties": {
+          "en_provision_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "semantic_equivalence_status": {
+            "const": "human_reviewed_equivalent"
+          }
+        },
+        "required": [
+          "semantic_equivalence_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "en_provision_id"
+        ],
+        "properties": {
+          "en_provision_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "numeric_consistency_status": {
             "const": "mismatch_flagged"
           }

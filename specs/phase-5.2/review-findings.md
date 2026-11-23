@@ -93,3 +93,45 @@ In response to independent Codex review findings on PR #2 at `56c2b21`, the plan
    - Updated readiness and validation reports to 57 schema tests and 202 total tests.
    - Inserted full, unclipped output of `validate.py`, explicitly disclosing the 4 unretrieved upstream raw PDF snapshots and 61 uningested articles of FDL 33/2021.
    - Documented Cabinet Resolution 1/2022's full 39-article scope (1 ingested, 38 uningested).
+
+## 6. PR #2 Final Codex BLOCK Remediation Pass (Issue-by-Issue Resolution)
+
+In response to the independent Codex re-review of PR #2 at `31b2deee7ed21805b4b4da0ccb12ff0ed9df0783` (which confirmed PR mergeability and 11 green CI jobs), all confirmed findings were remediated within specification, contract, schema, and test artifacts without modifying production runtime code (`src/uae_lexagent/`):
+
+1. **Historical Coverage Verification (HIGH):**
+   - **Defect Addressed:** Previous historical-query branch allowed interval selection on `[effective_from, effective_until]` without affirmative confirmation that all amending instruments for that topic were ingested.
+   - **Remediation:** Mandated positive verified topic certification in `BoundaryRegistry.verified_topics`. Matching an existing statutory interval is strictly insufficient by itself; unknown, missing, incomplete, or contradictory historical coverage fails closed and abstains (`abstention_reason="unverified_historical_topic_coverage"`).
+   - **Current-Law Freshness:** Current-law queries continue to enforce the 180-day freshness horizon from `effective_as_of_max`, failing closed with `abstention_reason="corpus_verification_expired"`.
+   - **Acceptance Scenario Added:** S-10 (historical query for uncertified topic fails closed).
+
+2. **FDL 9/2024 Article 54 Transition Operative Contract (HIGH):**
+   - **Defect Addressed:** Over-simplified transitional rules risked determining venue solely by filing date.
+   - **Remediation:** Detailed 5 discrete conditions required to apply the transitional rule:
+     1. Matter falls within Article 54(3) summary jurisdiction;
+     2. Benchmark date is 31 August 2024;
+     3. Matter was pending before Court of Appeal on 31 August 2024;
+     4. Decided exception (*محكوم فيها*): lawsuits already decided remain before Court of Appeal;
+     5. Reserved for judgment exception (*محجوزة للحكم*): lawsuits reserved for judgment remain before Court of Appeal.
+   - **Procedural Fact Sufficiency:** A court can NEVER be selected by filing date alone; missing procedural facts must trigger clarification or fail closed (`abstention_reason="missing_procedural_facts"`).
+   - **Acceptance Scenarios Added:** S-11 (qualifying pending transfer to CFI without fees), S-12 (decided exception retained at CoA), S-13 (reserved for judgment exception retained at CoA), S-14 (unrelated appeal unaffected), S-15 (pre-commencement historical query), S-16 (ambiguous procedural facts abstention).
+
+3. **Schema Safety Invariants (HIGH):**
+   - Fixed 4 verified schema defects across contracts:
+     - `legal_provision.schema.json`: In `VERIFIED_PUBLISHABLE` conditional block, forbade active caveats by setting `caveat_codes: { maxItems: 0 }`.
+     - `legal_provision.schema.json`: When `publication_state == "UNRESOLVED_HISTORICAL"`, required explicit uncertainty bounds (`uncertainty_window_start`, `uncertainty_window_end`).
+     - `bilingual_alignment_audit.schema.json`: When `structural_alignment_status == "exact_match"` or `semantic_equivalence_status == "human_reviewed_equivalent"`, required non-null, non-empty `en_provision_id` (`{ "type": "string", "minLength": 1 }`).
+     - `source_snapshot.schema.json`: When `is_authoritative: true`, strictly required `language: "ar"`.
+   - Added 4 focused negative unit tests in `tests/test_phase_5_2_schemas.py` asserting exact error paths and validator codes (`maxItems`, `type`, `const`).
+
+4. **Enforcement Coverage Across Actual Repository Modules (HIGH):**
+   - Updated `retrieval_and_verifier_contracts.md`, `plan.md`, and `tasks.md` to reference the real repository layout:
+     - Standalone retrieval: `src/uae_lexagent/retrieval/hybrid.py`, `baseline.py`, `sparse.py`, `dense.py`, `fusion.py`, `indexing.py`, `contracts.py`.
+     - Synthesis engine & verifier: `src/uae_lexagent/synthesis/engine.py`, `synthesis/verifier.py`, `synthesis/contracts.py`.
+     - Agent orchestration: `src/uae_lexagent/agent/nodes.py`, `agent/graph.py`, `agent/orchestrator.py`.
+   - Mandated universal evidence provenance gate (`RV-01`–`RV-03`) for caller-supplied synthesis evidence.
+
+5. **Medium Findings Resolved:**
+   - **Synthetic Fixture Integrity:** Reconciled SHA-256 for `claim_key_registry.positive.json` in `release_manifest.positive.json`. Formally classified fixture hashes as shape-only examples with no integrity claims, completely isolated from the production publication pipeline.
+   - **Compatibility Matrix Reclassification:** Reclassified `test_bm25_index_filters_jurisdiction_and_temporality` to Tier 2 (opt-in in M5.2.3 / PR-6) because its in-memory fixture provisions default to `LEGACY_UNVERIFIED`. Updated counts: 117 Tier 1, 23 Tier 2, 5 Tier 3 = 145 baseline tests; 61 schema tests = 206 total tests.
+   - **Canonical Corpus Fingerprint vs Release Manifest Digest:** Formally separated the data payload fingerprint (SHA-256 of sorted canonical provisions via `compute_corpus_fingerprint`) from the release manifest signing envelope (SHA-256 of `release_manifest.json`).
+   - **Evidence Reports & Status Reconciliation:** Verified FDL 20/2023 enactment date as 27 Safar 1445 AH (*27 صفر 1445 هـ* corresponding to 13 September 2023 per primary Arabic enactment text), distinguished primary statutory facts from secondary commentary, confirmed 14 ingested articles (61+38 uningested), 11 passing CI jobs, and 436 warnings in existing test runs.

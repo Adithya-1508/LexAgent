@@ -251,7 +251,10 @@ def test_schema_conditional_corroboration_consistency() -> None:
 
     validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
     errors = list(validator.iter_errors(instance))
-    assert errors, "Expected validation failure for none_operator_only with cross_check_passed=True"
+    assert any(
+        err.validator == "const" and list(err.path) == ["independent_cross_check_passed"]
+        for err in errors
+    ), f"Expected const error on independent_cross_check_passed, got: {errors}"
 
 
 def test_schema_conditional_authoritative_language_primacy() -> None:
@@ -265,7 +268,9 @@ def test_schema_conditional_authoritative_language_primacy() -> None:
 
     validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
     errors = list(validator.iter_errors(instance))
-    assert errors, "Expected validation failure for is_authoritative=True with language='en'"
+    assert any(err.validator == "const" and list(err.path) == ["language"] for err in errors), (
+        f"Expected const error on language, got: {errors}"
+    )
 
 
 def test_schema_conditional_amendment_action_requirements() -> None:
@@ -278,4 +283,71 @@ def test_schema_conditional_amendment_action_requirements() -> None:
 
     validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
     errors = list(validator.iter_errors(instance))
-    assert errors, "Expected validation failure for replaces action with prior_version_id=None"
+    assert any(
+        err.validator == "type" and list(err.path) == ["prior_version_id"] for err in errors
+    ), f"Expected type error on prior_version_id, got: {errors}"
+
+
+def test_schema_verified_publishable_forbids_active_caveats() -> None:
+    """LegalProvision: VERIFIED_PUBLISHABLE cannot coexist with active caveat codes."""
+    schema = _load_schema("legal_provision.schema.json")
+    instance = copy.deepcopy(_load_fixture("legal_provision.positive.json"))
+
+    instance["publication_state"] = "VERIFIED_PUBLISHABLE"
+    instance["caveat_codes"] = ["STATUTORY_INTERACTION_CR_96_2023"]
+
+    validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
+    errors = list(validator.iter_errors(instance))
+    assert any(
+        err.validator == "maxItems" and list(err.path) == ["caveat_codes"] for err in errors
+    ), f"Expected maxItems error on caveat_codes, got: {errors}"
+
+
+def test_schema_unresolved_historical_requires_uncertainty_bounds() -> None:
+    """LegalProvision: UNRESOLVED_HISTORICAL strictly requires uncertainty window bounds."""
+    schema = _load_schema("legal_provision.schema.json")
+    instance = copy.deepcopy(_load_fixture("legal_provision.positive.json"))
+
+    instance["publication_state"] = "UNRESOLVED_HISTORICAL"
+    instance["uncertainty_window_start"] = None
+    instance["uncertainty_window_end"] = None
+
+    validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
+    errors = list(validator.iter_errors(instance))
+    assert any(
+        err.validator == "type" and list(err.path) == ["uncertainty_window_start"] for err in errors
+    ), f"Expected type error on uncertainty_window_start, got: {errors}"
+    assert any(
+        err.validator == "type" and list(err.path) == ["uncertainty_window_end"] for err in errors
+    ), f"Expected type error on uncertainty_window_end, got: {errors}"
+
+
+def test_schema_bilingual_exact_match_requires_en_provision_id() -> None:
+    """BilingualAlignmentAudit: exact_match or reviewed_equivalent cannot have null en_provision_id."""
+    schema = _load_schema("bilingual_alignment_audit.schema.json")
+    instance = copy.deepcopy(_load_fixture("bilingual_alignment_audit.positive.json"))
+
+    instance["structural_alignment_status"] = "exact_match"
+    instance["semantic_equivalence_status"] = "human_reviewed_equivalent"
+    instance["en_provision_id"] = None
+
+    validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
+    errors = list(validator.iter_errors(instance))
+    assert any(
+        err.validator == "type" and list(err.path) == ["en_provision_id"] for err in errors
+    ), f"Expected type error on en_provision_id, got: {errors}"
+
+
+def test_schema_source_snapshot_authoritative_requires_arabic() -> None:
+    """LegalSource (source_snapshot): is_authoritative = true strictly requires language = 'ar'."""
+    schema = _load_schema("source_snapshot.schema.json")
+    instance = copy.deepcopy(_load_fixture("source_snapshot.positive.json"))
+
+    instance["is_authoritative"] = True
+    instance["language"] = "en"
+
+    validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
+    errors = list(validator.iter_errors(instance))
+    assert any(err.validator == "const" and list(err.path) == ["language"] for err in errors), (
+        f"Expected const error on language for authoritative source_snapshot, got: {errors}"
+    )

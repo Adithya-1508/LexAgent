@@ -5,7 +5,7 @@
   "git_commit_sha": "ab14df9876543210abcdef0123456789abcdef01",
   "effective_as_of_max": "2024-08-31",
   "corpus_fingerprint": "4676bd2cf67ece0f245188bc5053c0264b74777cf9d0be6f681766b9ed8ff5af",
-  "claim_key_registry_sha256": "ca978112ca1bbdcdafac231b39a23dc4da78608149644015673d76326a31f740",
+  "claim_key_registry_sha256": "eb453537a1ac5487e5a242514c3b77987bf20c5af59be69f797fcfb655dec98c",
   "documents": [
     {
       "document_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021",
