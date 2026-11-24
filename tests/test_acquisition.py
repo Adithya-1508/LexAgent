@@ -2,12 +2,14 @@
 
 import hashlib
 import http.server
+import io
 import json
 import os
 import ssl
 import subprocess
 import threading
 import time
+import zipfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -900,3 +902,203 @@ def test_stream_reader_stops_at_limit_before_the_remaining_body() -> None:
             with pytest.raises(AcquisitionError, match="exceeds maximum"):
                 acquisition._read_response(response, max_bytes=20)
     assert chunks_read == [0, 1]
+
+
+def _manual_cli_args(directory: Path) -> tuple[list[str], Path]:
+    pdf = _pdf()
+    document = directory / "manual.pdf"
+    evidence = directory / "attestation.json"
+    document.write_bytes(pdf)
+    evidence.write_text(_attestation(pdf).model_dump_json(), encoding="utf-8")
+    return [
+        "ingest-local",
+        "--file",
+        str(document),
+        "--attestation",
+        str(evidence),
+        "--document-id",
+        "test-document",
+        "--lang",
+        "ar",
+        "--publisher",
+        "Fixture",
+    ], evidence
+
+
+@pytest.fixture
+def exported_corpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    archive = subprocess.check_output(
+        ["git", "archive", "--format=zip", "HEAD", "data/official_sources"]
+    )
+    export = tmp_path / "export"
+    with zipfile.ZipFile(io.BytesIO(archive)) as package:
+        package.extractall(export)
+    monkeypatch.chdir(export)
+    assert not (export / ".git").exists()
+    return export / "data" / "official_sources"
+
+
+def _corpus_tree(root: Path) -> dict[Path, bytes | None]:
+    return {
+        path.relative_to(root): path.read_bytes() if path.is_file() else None
+        for path in root.rglob("*")
+    }
+
+
+@pytest.mark.parametrize("checkout", ["git-checkout", "git-archive"])
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "root-relative",
+        "root-absolute",
+        "child-relative",
+        "child-absolute",
+        "legacy-private",
+        "alias",
+    ],
+)
+def test_cli_production_corpus_is_immutable(
+    exported_corpus: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    checkout: str,
+    destination: str,
+) -> None:
+    if checkout == "git-checkout":
+        subprocess.run(["git", "init", "--quiet"], check=True)
+    root = exported_corpus
+    if destination == "alias":
+        location = tmp_path / "redirected"
+        if os.name == "nt":
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(location), str(root)],
+                check=True,
+                capture_output=True,
+            )
+        else:
+            location.symlink_to(root, target_is_directory=True)
+    else:
+        location = root / "raw" if destination.startswith("child") else root
+        if destination == "legacy-private":
+            location = root / ".acquisition"
+        elif destination.endswith("relative"):
+            location = location.relative_to(Path.cwd())
+    expected = _corpus_tree(root)
+    argv, _ = _manual_cli_args(tmp_path)
+
+    def reject_writer_entry(directory: Path) -> None:
+        pytest.fail(f"Production path reached the manifest writer: {directory}")
+
+    # Prevent any manifest write even if the guard regresses on this exported corpus.
+    monkeypatch.setattr(storage, "_manifest_lock", reject_writer_entry)
+    assert main([*argv, "--snapshot-dir", str(location)]) == 1
+    error = capsys.readouterr().err
+    assert ("Redirected acquisition root" if destination == "alias" else "private staging") in error
+    assert _corpus_tree(root) == expected
+
+
+@pytest.mark.parametrize("destination", ["default", "external"])
+def test_cli_keeps_private_staging_outside_production(
+    exported_corpus: Path,
+    tmp_path: Path,
+    destination: str,
+) -> None:
+    argv, _ = _manual_cli_args(tmp_path)
+    expected = _corpus_tree(exported_corpus)
+    if destination == "external":
+        root = tmp_path / "external-private"
+        argv.extend(["--snapshot-dir", str(root)])
+    else:
+        subprocess.run(["git", "init", "--quiet"], check=True)
+        root = Path("data/.acquisition")
+    assert main(argv) == 0
+    assert (root / "attestations.json").is_file() and (root / "manifest.json").is_file()
+    assert _corpus_tree(exported_corpus) == expected
+
+
+@pytest.mark.parametrize("case", ["valid", "exact-limit", "oversized", "malformed", "directory"])
+def test_cli_attestation_input_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    case: str,
+) -> None:
+    argv, evidence = _manual_cli_args(tmp_path)
+    root = tmp_path / "staging"
+    valid = evidence.read_bytes()
+    limit = 64 * 1024
+    if case in {"exact-limit", "oversized"}:
+        size = limit if case == "exact-limit" else limit + 1
+        evidence.write_bytes(valid.ljust(size, b" "))
+    elif case == "malformed":
+        evidence.write_bytes(b"{")
+    elif case == "directory":
+        argv[argv.index("--attestation") + 1] = str(tmp_path)
+
+    if case == "oversized":
+
+        def reject_parser_entry(*args: object, **kwargs: object) -> None:
+            pytest.fail("Oversized attestation reached JSON parsing")
+
+        monkeypatch.setattr(ManualAttestation, "model_validate_json", reject_parser_entry)
+
+    result = main([*argv, "--snapshot-dir", str(root)])
+    if case in {"valid", "exact-limit"}:
+        assert result == 0
+        assert (root / "manifest.json").is_file()
+        assert (root / "attestations.json").is_file()
+        assert len(list(root.rglob("*.pdf"))) == 1
+    else:
+        assert result == 1
+        assert {
+            "oversized": "exceeds maximum",
+            "malformed": "Invalid JSON",
+            "directory": "regular file",
+        }[case] in capsys.readouterr().err
+        assert not root.exists()
+
+
+@pytest.mark.parametrize("failure", ["transient", "persistent"])
+def test_manifest_retry_reconfirms_directory_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    pdf = _pdf()
+    document = tmp_path / "manual.pdf"
+    document.write_bytes(pdf)
+    root = tmp_path / "staging"
+    attestation = _attestation(pdf)
+    sync_directory = storage._sync_directory
+    attempts = 0
+
+    def sync(path: Path) -> None:
+        nonlocal attempts
+        if path == root and (root / "manifest.json").is_file():
+            attempts += 1
+            if attempts == 1 or failure == "persistent":
+                raise OSError("manifest directory sync failed")
+        sync_directory(path)
+
+    def ingest() -> None:
+        ingest_local(document, attestation, "test-document", "ar", "Fixture", True, root)
+
+    monkeypatch.setattr(storage, "_sync_directory", sync)
+    with pytest.raises(OSError, match="manifest directory sync failed"):
+        ingest()
+    assert attempts == 1
+    accepted = _corpus_tree(root)
+    record = json.loads(accepted[Path("manifest.json")] or b"[]")[0]
+    assert record["attestation_id"] == attestation.attestation_id
+    assert accepted[Path(record["local_path"])] == pdf
+    assert json.loads(accepted[Path("attestations.json")] or b"[]") == [
+        attestation.model_dump(mode="json")
+    ]
+    if failure == "persistent":
+        with pytest.raises(OSError, match="manifest directory sync failed"):
+            ingest()
+    else:
+        ingest()
+    assert attempts == 2
+    assert _corpus_tree(root) == accepted

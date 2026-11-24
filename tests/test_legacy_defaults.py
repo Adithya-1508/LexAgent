@@ -328,3 +328,124 @@ def test_in_force_nonlegacy_requires_effective_from() -> None:
             publication_state="PUBLISHED_WITH_CAVEAT",
             caveat_codes=["TEST_CAVEAT"],
         )
+
+
+def _contract_fixture(name: str) -> tuple[Draft202012Validator, dict[str, object]]:
+    root = Path("specs/phase-5.2")
+    schema = json.loads((root / "contracts" / f"{name}.schema.json").read_bytes())
+    payload = json.loads((root / "fixtures" / f"{name}.positive.json").read_bytes())
+    return Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER), payload
+
+
+@pytest.mark.parametrize(
+    ("artifact_type", "content_type", "valid"),
+    [
+        ("raw_html", "text/html", True),
+        ("raw_pdf", "application/pdf", True),
+        ("raw_html", "application/pdf", False),
+        ("raw_pdf", "text/html", False),
+    ],
+    ids=["html", "pdf", "html-with-pdf-mime", "pdf-with-html-mime"],
+)
+def test_source_capture_mime_schema_model_parity(
+    artifact_type: str,
+    content_type: str,
+    valid: bool,
+) -> None:
+    validator, payload = _contract_fixture("source_snapshot")
+    payload.update(
+        artifact_type=artifact_type,
+        http_capture={
+            "final_url": payload["source_url"],
+            "redirect_history": [],
+            "status_code": 200,
+            "content_type": content_type,
+            "response_headers": {"content-type": content_type},
+        },
+    )
+    assert validator.is_valid(payload) is valid
+    if valid:
+        assert LegalSource.model_validate_json(json.dumps(payload)).artifact_type == artifact_type
+    else:
+        with pytest.raises(ValidationError, match="artifact format"):
+            LegalSource.model_validate_json(json.dumps(payload))
+
+
+def test_direct_capture_final_url_is_a_runtime_invariant() -> None:
+    validator, payload = _contract_fixture("source_snapshot")
+    payload["http_capture"] = {
+        "final_url": "https://uaelegislation.gov.ae/different",
+        "redirect_history": [],
+        "status_code": 200,
+        "content_type": "text/html",
+        "response_headers": {},
+    }
+    assert validator.is_valid(payload)
+    with pytest.raises(ValidationError, match="source URL"):
+        LegalSource.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    ("contract", "field", "model"),
+    [
+        ("manual_attestation", "acquired_at_utc", ManualAttestation),
+        ("legal_provision", "reviewed_at_utc", LegalProvision),
+    ],
+    ids=["attestation", "provision-review"],
+)
+@pytest.mark.parametrize(
+    ("value", "valid"),
+    [
+        ("2026-11-20T10:00:03.125+04:00", True),
+        ("2026-11-20T10:00Z", False),
+        ("2026-11-20T10:00:03", False),
+    ],
+    ids=["seconds-and-offset", "missing-seconds", "missing-zone"],
+)
+def test_timestamp_schema_model_parity(
+    contract: str,
+    field: str,
+    model: type[BaseModel],
+    value: str,
+    valid: bool,
+) -> None:
+    validator, payload = _contract_fixture(contract)
+    payload[field] = value
+    assert validator.is_valid(payload) is valid
+    if valid:
+        result = model.model_validate_json(json.dumps(payload))
+        assert getattr(result, field).utcoffset() is not None
+        # Internal timezone-aware datetime construction uses the same record contract.
+        payload[field] = getattr(result, field)
+        assert model.model_validate(payload) == result
+    else:
+        with pytest.raises(ValidationError, match=field):
+            model.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    ("value", "valid"),
+    [
+        (0.95, True),
+        (1, True),
+        (0, True),
+        (None, True),
+        ("0.95", False),
+        (True, False),
+        (-0.01, False),
+        (1.01, False),
+    ],
+    ids=["float", "one", "zero", "null", "string", "boolean", "below-min", "above-max"],
+)
+def test_fidelity_score_schema_model_parity(value: object, valid: bool) -> None:
+    validator, payload = _contract_fixture("legal_provision")
+    payload["extraction_fidelity_score"] = value
+    assert validator.is_valid(payload) is valid
+    if valid:
+        assert (
+            LegalProvision.model_validate_json(json.dumps(payload)).extraction_fidelity_score
+            == value
+        )
+    else:
+        with pytest.raises(ValidationError, match="extraction_fidelity_score"):
+            LegalProvision.model_validate_json(json.dumps(payload))

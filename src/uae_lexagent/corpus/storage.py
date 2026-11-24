@@ -16,6 +16,9 @@ from pydantic import TypeAdapter
 
 from ..models import LegalSource, ManualAttestation
 
+DEFAULT_STAGING_DIR = Path("data/.acquisition")
+_PRODUCTION_CORPUS_DIR = Path("data/official_sources")
+
 
 class AcquisitionError(Exception):
     """Base exception for source acquisition failures."""
@@ -52,10 +55,14 @@ def _root(base_dir: Path) -> Path:
 
 def _private_root(base_dir: Path) -> Path:
     root = _root(base_dir)
-    for parent in (root, *root.parents):
+    ancestors = (root, *root.parents)
+    if any(Path(*directory.parts[-2:]) == _PRODUCTION_CORPUS_DIR for directory in ancestors):
+        raise SecurityPolicyViolationError(
+            "Acquisition requires private staging outside the production corpus"
+        )
+    for parent in ancestors:
         if (parent / ".git").exists():
-            staged = parent / "data" / "official_sources" / ".acquisition"
-            if not root.is_relative_to(staged):
+            if not root.is_relative_to(parent / DEFAULT_STAGING_DIR):
                 raise SecurityPolicyViolationError(
                     "Acquisition requires a private staging directory"
                 )
@@ -232,6 +239,8 @@ def persist_acquisition(
                     raise SnapshotIntegrityError("Accepted source is missing its attestation")
                 target = compute_snapshot_path(root, source.sha256, suffix)
                 _verify_snapshot(target, source.sha256, len(content))
+                # A previous commit may have replaced the manifest before this sync failed.
+                _sync_directory(root)
                 return existing
 
         manifest_bytes = _SOURCE_RECORDS.dump_json([*sources, source], indent=2) + b"\n"

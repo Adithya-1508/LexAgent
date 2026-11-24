@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://lexagent.local/schemas/phase-5.2/source_snapshot.schema.json",
+  "$comment": "Runtime validation requires source_url to equal http_capture.final_url for a direct response, or the first redirect_history URL when redirects occurred. Standard JSON Schema cannot compare arbitrary sibling values.",
   "title": "LegalSource (Phase 5.2)",
   "type": "object",
   "additionalProperties": false,
@@ -331,6 +332,30 @@
               "raw_pdf",
               "raw_html"
             ]
+          }
+        },
+        "if": {
+          "required": ["artifact_type"],
+          "properties": {
+            "artifact_type": {"const": "raw_html"}
+          }
+        },
+        "then": {
+          "properties": {
+            "http_capture": {
+              "properties": {
+                "content_type": {"const": "text/html"}
+              }
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "http_capture": {
+              "properties": {
+                "content_type": {"const": "application/pdf"}
+              }
+            }
           }
         }
       }

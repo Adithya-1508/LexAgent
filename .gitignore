@@ -11,3 +11,4 @@ scratch/
 .mypy_cache/
 
 /data/official_sources/.acquisition/
+/data/.acquisition/

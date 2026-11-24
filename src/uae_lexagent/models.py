@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -100,8 +101,12 @@ def _absolute_uri(value: str) -> str:
 def _date_time_input(value: Any) -> Any:
     if value is None or isinstance(value, datetime):
         return value
-    if not isinstance(value, str) or value[10:11] not in {"T", "t"}:
-        raise ValueError("Expected a timezone-aware date-time")
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}"
+        r"(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})",
+        value,
+    ):
+        raise ValueError("Expected an RFC 3339 date-time with seconds and a timezone")
     return value
 
 
@@ -335,7 +340,7 @@ class LegalProvision(_ValidatedRecord):
     source_url: str = Field(min_length=1)
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
-    extraction_fidelity_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    extraction_fidelity_score: float | None = Field(default=None, strict=True, ge=0.0, le=1.0)
     cmap_corruption_detected: StrictBool = False
     human_verification_status: Literal["unreviewed", "extraction_verified", "rejected"] = (
         "unreviewed"

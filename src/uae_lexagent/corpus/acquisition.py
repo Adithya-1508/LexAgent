@@ -24,6 +24,7 @@ from ..models import (
     RedistributionClearance,
 )
 from .storage import (
+    DEFAULT_STAGING_DIR,
     AcquisitionError,
     SecurityPolicyViolationError,
     SnapshotIntegrityError,
@@ -49,8 +50,8 @@ __all__ = [
 
 UNRETRIEVED_UPSTREAM_PDF_GATE = "UNRETRIEVED_UPSTREAM_PDF_GATE"
 MAX_ACQUISITION_BYTES = 50_000_000
+MAX_ATTESTATION_BYTES = 64 * 1024
 DEFAULT_TIMEOUT_SECONDS = 30.0
-DEFAULT_SNAPSHOT_DIR = Path("data/official_sources/.acquisition")
 _MAX_REDIRECTS = 5
 _HEADERS = (
     "content-type",
@@ -351,6 +352,23 @@ def acquire_from_url(
     )
 
 
+def _read_local_file(path: Path, limit: int, label: str) -> bytes:
+    try:
+        if not path.is_file():
+            raise AcquisitionError(f"{label} does not exist or is not a regular file: {path}")
+        with path.open("rb") as file:
+            info = os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise AcquisitionError(f"{label} is not a regular file: {path}")
+            if info.st_size <= limit:
+                content = file.read(limit + 1)
+                if len(content) <= limit:
+                    return content
+    except OSError as exc:
+        raise AcquisitionError(f"Could not read {label.lower()}: {exc}") from exc
+    raise AcquisitionError(f"{label} exceeds maximum size of {limit} bytes")
+
+
 def ingest_local(
     file_path: Path,
     attestation: ManualAttestation,
@@ -380,22 +398,7 @@ def ingest_local(
     if is_authoritative and language != "ar":
         raise ValueError("Authoritative legal sources must be Arabic ('ar')")
 
-    try:
-        if not file_path.is_file():
-            raise AcquisitionError(
-                f"Local file does not exist or is not a regular file: {file_path}"
-            )
-        with file_path.open("rb") as file:
-            info = os.fstat(file.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise AcquisitionError("Local input is not a regular file")
-            if info.st_size > MAX_ACQUISITION_BYTES:
-                raise AcquisitionError("Local file exceeds maximum size")
-            content = file.read(MAX_ACQUISITION_BYTES + 1)
-            if len(content) > MAX_ACQUISITION_BYTES:
-                raise AcquisitionError("Local file exceeds maximum size")
-    except OSError as exc:
-        raise AcquisitionError(f"Could not read local capture: {exc}") from exc
+    content = _read_local_file(file_path, MAX_ACQUISITION_BYTES, "Local file")
 
     # Operator-supplied corroboration is kept as an assertion for later review.
     return _accept(
@@ -449,7 +452,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     acquire_parser.add_argument(
         "--snapshot-dir",
         type=Path,
-        default=DEFAULT_SNAPSHOT_DIR,
+        default=DEFAULT_STAGING_DIR,
         help="Private staging directory for snapshots and acquisition evidence",
     )
 
@@ -459,7 +462,10 @@ def build_cli_parser() -> argparse.ArgumentParser:
     )
     ingest_parser.add_argument("--file", type=Path, required=True, help="Path to local file")
     ingest_parser.add_argument(
-        "--attestation", type=Path, required=True, help="Path to ManualAttestation JSON"
+        "--attestation",
+        type=Path,
+        required=True,
+        help="Path to ManualAttestation JSON (64 KiB maximum)",
     )
     ingest_parser.add_argument("--document-id", required=True, help="Canonical document identifier")
     ingest_parser.add_argument(
@@ -478,7 +484,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument(
         "--snapshot-dir",
         type=Path,
-        default=DEFAULT_SNAPSHOT_DIR,
+        default=DEFAULT_STAGING_DIR,
         help="Private staging directory for snapshots and acquisition evidence",
     )
 
@@ -508,7 +514,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         elif args.subcommand == "ingest-local":
-            attestation = ManualAttestation.model_validate_json(args.attestation.read_bytes())
+            attestation_bytes = _read_local_file(
+                args.attestation, MAX_ATTESTATION_BYTES, "Attestation file"
+            )
+            attestation = ManualAttestation.model_validate_json(attestation_bytes)
 
             source = ingest_local(
                 file_path=args.file,
