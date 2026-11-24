@@ -46,8 +46,8 @@ In response to independent Codex review findings on PR #2 at `56c2b21`, the plan
    - Preserved all 11 existing CI workflow jobs and left `src/uae_lexagent/` untouched.
 
 2. **Official Legal-Source Verification (HIGH):**
-   - **FDL 20/2023:** Verified enactment 2023-09-13, Gazette 759 (2023-09-28), commencement 2024-01-01 per Art. 2. Summary MoHRE decisions <= AED 50k appealed to Court of Appeal within **15 working days** (*خمسة عشر يوم عمل*); court delivers judgment within 15 working days; 1-year limitation from right due date. Official standalone English translation confirmed unavailable on federal portal; MoHRE-hosted English translation is strictly informational convenience and legally non-authoritative (Arabic text is sole authority per Art 66(2)).
-   - **FDL 9/2024:** Verified enactment 2024-07-29, Gazette 780 (2024-07-31), commencement 2024-08-31 per Art. 4 (after 30 days from publication). Articles 1–4 verified: Art. 1 replaces Art. 54 (appeal venue to Court of First Instance within 15 working days, 2-year limitation from termination) and Art. 60 (fines up to AED 1M); Art. 2 mandates transfer of pending Court of Appeal cases without fees except decided/reserved matters; Art. 3 repeals contrary provisions; Art. 4 governs publication and 30-day commencement.
+   - **FDL 20/2023:** Verified issuance on 2023-09-13 and commencement on 2024-01-01 under Article 2. Exact Gazette publication metadata remain unverified (EVID-12). Article 54(3) gave the Court of Appeal 15 working days to decide challenges brought within 15 working days of notice. The previous limitation was one year from when the right fell due.
+   - **FDL 9/2024:** Verified issuance on 2024-07-29, direct filing under Article 54(3), the limited Article 2 transfer and exceptions, and Article 4's commencement formula. Exact commencement is unresolved (EVID-17).
    - **Cabinet Resolution 1/2022:** Resolved discrepancy between 17 January 2022 and 3 February 2022 using primary sources: formally enacted/issued **3 February 2022** (2 Rajab 1443 AH) by the Vice President and Prime Minister per `uaelegislation.gov.ae`; 17 January 2022 was preliminary Cabinet session approval / press announcement. Published in Gazette 721 dated 2022-02-15, in force 2022-02-02 per Art. 39. Exactly 39 articles (1 ingested in baseline, 38 uningested). Primary metadata reconciled in `data/official_sources/cabinet_resolution_1_2022_document.json` (`issued_date: 2022-02-03`).
    - **Statutory Clause-Level Binding (Article 51(1) vs 51(2)):** Disentangled Article 51(1) (UAE National Worker pensions/GPSSA) from Article 51(2) (foreign full-time worker end-of-service gratuity formula and 1-year service threshold). Corrected fixtures and claim registry to bind gratuity entitlement strictly to `ART_51_02`.
 
@@ -108,8 +108,8 @@ In response to the independent Codex re-review of PR #2 at `31b2deee7ed21805b4b4
    - **Defect Addressed:** Over-simplified transitional rules risked determining venue solely by filing date.
    - **Remediation:** Detailed 5 discrete conditions required to apply the transitional rule:
      1. Matter falls within Article 54(3) summary jurisdiction;
-     2. Benchmark date is 31 August 2024;
-     3. Matter was pending before Court of Appeal on 31 August 2024;
+     2. Establish the legally verified commencement date before venue selection.
+     3. Establish whether the matter was pending before the Court of Appeal at verified commencement.
      4. Decided exception (*محكوم فيها*): lawsuits already decided remain before Court of Appeal;
      5. Reserved for judgment exception (*محجوزة للحكم*): lawsuits reserved for judgment remain before Court of Appeal.
    - **Procedural Fact Sufficiency:** A court can NEVER be selected by filing date alone; missing procedural facts must trigger clarification or fail closed (`abstention_reason="missing_procedural_facts"`).

@@ -70,7 +70,7 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
 ### 3.1 Temporal Cutoff & Current-Law Governance (`effective_as_of_max`)
 1. **Four Temporal Dimensions:**
    - `release_manifest.built_at_utc`: Generation timestamp of the corpus release artifact (reproducibly derived from `SOURCE_DATE_EPOCH` / git commit date).
-   - `release_manifest.effective_as_of_max`: Upper bound statutory date verified against the Official Gazette (`2024-08-31`).
+   - `release_manifest.effective_as_of_max`: Upper evaluation limit for the planned corpus (`2024-08-31`). Actual statutory coverage and any unresolved effective-date windows are checked independently for each topic.
    - `LegalDocument.last_verified_at_utc` / `LegalProvision.reviewed_at_utc`: Entity-level audit timestamps.
    - `query.as_of`: Query-specified evaluation date.
 2. **Current-Law Query Handling (`query.as_of is None`):**
