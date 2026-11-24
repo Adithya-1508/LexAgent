@@ -57,13 +57,15 @@ ls -la .git/hooks
 ls -la .github/hooks 2>/dev/null || true
 
 # 2. Provision virtual environment dependencies
-uv sync --extra dev
+uv sync --extra dev --extra corpus
 
 # 3. Install Lefthook hook wrappers
 uv run --no-sync --offline python -m lefthook install
 ```
 
 #### Upgrading Existing Installations:
+
+Full pytest collection and the pre-push legal safety check require the corpus extra. The acquisition tests use `openssl` on `PATH` to generate short-lived certificates for loopback HTTPS.
 
 To upgrade existing local wrappers to the verified fail-closed baseline:
 

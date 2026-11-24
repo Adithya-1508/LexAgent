@@ -131,7 +131,8 @@
         "string",
         "null"
       ],
-      "default": null
+      "default": null,
+      "pattern": "^SHA256:[a-fA-F0-9]{64}$"
     },
     "redistribution_clearance": {
       "type": "string",
@@ -141,6 +142,50 @@
         "pending_review"
       ],
       "default": "pending_review"
+    },
+    "http_capture": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": null,
+      "additionalProperties": false,
+      "required": [
+        "final_url",
+        "redirect_history",
+        "status_code",
+        "content_type",
+        "response_headers"
+      ],
+      "properties": {
+        "final_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "redirect_history": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "status_code": {
+          "const": 200
+        },
+        "content_type": {
+          "enum": [
+            "application/pdf",
+            "text/html"
+          ]
+        },
+        "response_headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "allOf": [
@@ -173,6 +218,13 @@
           "extraction_version": {
             "type": "string",
             "minLength": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "derived_from_source_id": {
+            "type": "null"
           }
         }
       }
@@ -222,6 +274,16 @@
           "tls_cert_fingerprint": {
             "type": "string",
             "pattern": "^SHA256:[a-fA-F0-9]{64}$"
+          },
+          "attestation_id": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "tls_cert_fingerprint": {
+            "type": "null"
           }
         }
       }
@@ -241,6 +303,34 @@
         "properties": {
           "language": {
             "const": "ar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "http_capture"
+        ],
+        "properties": {
+          "http_capture": {
+            "type": "object"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "authenticity_tier"
+        ],
+        "properties": {
+          "authenticity_tier": {
+            "const": "GOV_AUTOMATED_TLS_VERIFIED"
+          },
+          "artifact_type": {
+            "enum": [
+              "raw_pdf",
+              "raw_html"
+            ]
           }
         }
       }

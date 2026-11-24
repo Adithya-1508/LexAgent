@@ -7,6 +7,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from ..ingestion import compute_corpus_fingerprint as _compute_corpus_fingerprint
 from ..models import (
     BenchmarkCase,
     BenchmarkCategory,
@@ -52,13 +53,8 @@ def load_benchmark_manifest(path: Path) -> BenchmarkManifest:
 
 
 def compute_corpus_fingerprint(provisions: list[LegalProvision]) -> str:
-    """Compute a stable fingerprint from canonical provision records."""
-    records = [provision.model_dump(mode="json") for provision in provisions]
-    records.sort(key=lambda record: record["provision_id"])
-    payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-        "utf-8"
-    )
-    return hashlib.sha256(payload).hexdigest()
+    """Preserve the published Phase 5.1 benchmark digest for legacy input."""
+    return _compute_corpus_fingerprint(provisions, legacy_compatible=True)
 
 
 def validate_benchmark_manifest(

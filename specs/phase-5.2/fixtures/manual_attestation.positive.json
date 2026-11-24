@@ -9,5 +9,7 @@
   "independent_cross_check_ref": "SHA256 match against secondary government archive mirror",
   "independent_cross_check_passed": true,
   "corroboration_type": "automated_html_cross_check",
-  "notes": "Verified that Article 54 replacement text matches HTML text."
+  "notes": "Verified that Article 54 replacement text matches HTML text.",
+  "document_id": "SYNTHETIC_TEST_ONLY_FDL_20_2023",
+  "captured_sha256": "9bf7190c7cd3e52731e7a911f301025292be35231d6cda4db4ec59e7f236e284"
 }

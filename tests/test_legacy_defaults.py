@@ -1,12 +1,14 @@
 """Tests verifying fail-closed legacy defaults and publication state invariants (T-02 / REQ-06)."""
 
+import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from jsonschema import Draft202012Validator
+from pydantic import BaseModel, ValidationError
 
-from uae_lexagent.ingestion import load_provisions, load_source_manifest
+from uae_lexagent.ingestion import compute_corpus_fingerprint, load_provisions, load_source_manifest
 from uae_lexagent.models import (
     AuthenticityTier,
     DocumentCompleteness,
@@ -15,6 +17,7 @@ from uae_lexagent.models import (
     LegalProvision,
     LegalSource,
     LifecycleState,
+    ManualAttestation,
     PublicationState,
     RedistributionClearance,
     SourceType,
@@ -73,7 +76,7 @@ def test_legal_provision_legacy_defaults() -> None:
     assert prov.logical_provision_id == "prov-1-ar"
     assert prov.version_id == "prov-1-ar@legacy"
     assert prov.lifecycle_state is LifecycleState.IN_FORCE
-    assert prov.caveat_codes == []
+    assert not prov.caveat_codes
     assert prov.translation_provenance == "authoritative_original"
     assert prov.human_verification_status == "unreviewed"
     assert prov.cmap_corruption_detected is False
@@ -108,6 +111,7 @@ def _make_base_provision(provision_id: str = "prov-test", **kwargs: object) -> L
         "is_authoritative": True,
         "text": "نص",
         "source_url": "https://mohre.gov.ae/law.pdf",
+        "effective_from": date(2022, 2, 2),
     }
     params.update(kwargs)
     return LegalProvision.model_validate(params)
@@ -217,3 +221,110 @@ def test_lifecycle_state_superseded_and_repealed_invariants() -> None:
     )
     assert prov_repealed.gap_or_repeal_reason is not None
     assert "Federal Decree-Law No. 20 of 2023" in prov_repealed.gap_or_repeal_reason
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "model"),
+    [
+        ("manual_attestation", ManualAttestation),
+        ("source_snapshot", LegalSource),
+        ("legal_provision", LegalProvision),
+    ],
+)
+def test_phase_5_2_model_schema_fixture_parity(schema_name: str, model: type[BaseModel]) -> None:
+    root = Path("specs/phase-5.2")
+    schema = json.loads(
+        (root / "contracts" / f"{schema_name}.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
+    valid = (root / "fixtures" / f"{schema_name}.positive.json").read_text(encoding="utf-8")
+    invalid = (root / "fixtures" / f"{schema_name}.negative.json").read_text(encoding="utf-8")
+    assert validator.is_valid(json.loads(valid))
+    assert validator.is_valid(model.model_validate_json(valid).model_dump(mode="json"))
+    assert not validator.is_valid(json.loads(invalid))
+    with pytest.raises(ValidationError):
+        model.model_validate_json(invalid)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("document_id", None),
+        ("captured_sha256", "not-a-digest"),
+        ("acquired_at_utc", "2026-11-20T10:00:00"),
+        ("claimed_source_url", "/relative"),
+        ("independent_cross_check_passed", "false"),
+    ],
+)
+def test_attestation_rejects_invalid_binding_fields(name: str, value: object) -> None:
+    path = Path("specs/phase-5.2/fixtures/manual_attestation.positive.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[name] = value
+    with pytest.raises(ValidationError):
+        ManualAttestation.model_validate(payload)
+
+
+def test_rejected_assignment_preserves_model_invariants() -> None:
+    source = load_source_manifest(Path("data/official_sources/manifest.json"))[0]
+    provision = _make_base_provision()
+    with pytest.raises(ValidationError):
+        source.authenticity_tier = AuthenticityTier.GOV_AUTOMATED_TLS_VERIFIED
+    with pytest.raises(ValidationError):
+        provision.publication_state = PublicationState.VERIFIED_PUBLISHABLE
+    with pytest.raises(ValidationError):
+        provision.reviewed_at_utc = datetime(2026, 1, 1)
+    with pytest.raises(ValidationError):
+        provision.language = "en"
+    assert source.authenticity_tier is AuthenticityTier.LEGACY_UNATTESTED
+    assert provision.publication_state is PublicationState.LEGACY_UNVERIFIED
+    assert provision.reviewed_at_utc is None
+    assert provision.language == "ar"
+
+
+def test_provenance_serializes_direct_nested_and_json_without_loss() -> None:
+    provision = _make_base_provision(
+        publication_state="LEGACY_UNVERIFIED",
+        lifecycle_state="in_force",
+        logical_provision_id="logical",
+        normalized_text="normalized",
+        extraction_fidelity_score=0.95,
+        cmap_corruption_detected=False,
+        reviewed_at_utc="2026-11-20T10:00:00Z",
+        caveat_codes=[],
+    )
+
+    class Wrapper(BaseModel):
+        provision: LegalProvision
+
+    direct = provision.model_dump(mode="json")
+    assert direct == json.loads(provision.model_dump_json())
+    assert direct == Wrapper(provision=provision).model_dump(mode="json")["provision"]
+    assert direct == json.loads(Wrapper(provision=provision).model_dump_json())["provision"]
+    assert direct["publication_state"] == "LEGACY_UNVERIFIED"
+    assert direct["cmap_corruption_detected"] is False
+    assert direct["caveat_codes"] == []
+    assert direct["normalized_text"] == "normalized"
+    assert direct["extraction_fidelity_score"] == 0.95
+    assert direct["reviewed_at_utc"] == "2026-11-20T10:00:00Z"
+    assert direct["logical_provision_id"] == "logical"
+
+
+def test_full_fingerprint_binds_phase_5_2_metadata() -> None:
+    legacy = _make_base_provision()
+    explicit_default = _make_base_provision(publication_state="LEGACY_UNVERIFIED")
+    with_metadata = _make_base_provision(normalized_text="new metadata")
+    assert compute_corpus_fingerprint(
+        [legacy], legacy_compatible=True
+    ) != compute_corpus_fingerprint([explicit_default], legacy_compatible=True)
+    full = compute_corpus_fingerprint([legacy])
+    assert full == compute_corpus_fingerprint([explicit_default], legacy_compatible=True)
+    assert full != compute_corpus_fingerprint([with_metadata])
+
+
+def test_in_force_nonlegacy_requires_effective_from() -> None:
+    with pytest.raises(ValidationError, match="effective_from"):
+        _make_base_provision(
+            effective_from=None,
+            publication_state="PUBLISHED_WITH_CAVEAT",
+            caveat_codes=["TEST_CAVEAT"],
+        )

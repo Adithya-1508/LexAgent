@@ -160,6 +160,8 @@ def test_manual_attestation_validation() -> None:
     valid_attestation = ManualAttestation(
         attestation_id="attest-001",
         source_id="src-001",
+        document_id="doc-1",
+        captured_sha256="a" * 64,
         operator_id="operator-42",
         acquired_at_utc=datetime.now(timezone.utc),
         claimed_source_url="https://mohre.gov.ae/decree.pdf",
@@ -176,6 +178,8 @@ def test_manual_attestation_validation() -> None:
         ManualAttestation(
             attestation_id="attest-bad",
             source_id="src-001",
+            document_id="doc-1",
+            captured_sha256="a" * 64,
             operator_id="operator-42",
             acquired_at_utc=datetime.now(timezone.utc),
             claimed_source_url="https://mohre.gov.ae/decree.pdf",
@@ -191,6 +195,8 @@ def test_manual_attestation_validation() -> None:
         ManualAttestation(
             attestation_id="attest-short",
             source_id="src-001",
+            document_id="doc-1",
+            captured_sha256="a" * 64,
             operator_id="operator-42",
             acquired_at_utc=datetime.now(timezone.utc),
             claimed_source_url="https://mohre.gov.ae/decree.pdf",

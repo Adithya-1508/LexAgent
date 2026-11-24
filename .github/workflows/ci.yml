@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+          python -m pip install -e ".[dev,retrieval,qdrant,agent,corpus]"
 
       - name: Run Ruff lint check
         run: python -m ruff check .
@@ -64,7 +64,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+          python -m pip install -e ".[dev,retrieval,qdrant,agent,corpus]"
 
       - name: Run test suite with JUnit XML
         run: |
@@ -96,7 +96,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,retrieval,agent]"
+          python -m pip install -e ".[dev,retrieval,agent,corpus]"
 
       - name: Run legal safety tests
         run: python -m pytest -q -m legal_safety
@@ -137,6 +137,9 @@ jobs:
           - name: "core-minimal"
             install: ".[dev]"
             test_target: "tests/test_models.py tests/test_ingestion.py tests/test_tools.py tests/test_routing.py"
+          - name: "corpus-acquisition"
+            install: ".[dev,corpus]"
+            test_target: "tests/test_acquisition.py tests/test_legacy_defaults.py tests/test_phase_5_2_schemas.py"
           - name: "retrieval-qdrant"
             install: ".[dev,retrieval,qdrant]"
             test_target: "tests/test_retrieval.py"
@@ -233,7 +236,7 @@ jobs:
       - name: Install dependencies and pip-audit
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,retrieval,qdrant,agent]"
+          python -m pip install -e ".[dev,retrieval,qdrant,agent,corpus]"
           python -m pip install pip-audit
 
       - name: Run pip-audit scan

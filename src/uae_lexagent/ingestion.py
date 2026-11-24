@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Sequence
 from urllib.parse import urlparse
 
 from .models import LegalDocument, LegalProvision, LegalSource
@@ -15,6 +16,28 @@ ALLOWED_OFFICIAL_HOSTNAMES: set[str] = {
     "uaelegislation.gov.ae",
     "www.uaelegislation.gov.ae",
 }
+
+_PHASE_5_1_PROVISION_FIELDS = set(
+    "provision_id document_id source_id jurisdiction legal_domain article clause subclause "
+    "language is_authoritative alignment_id translation_of text effective_from effective_until "
+    "source_url page_start page_end".split()
+)
+
+
+def compute_corpus_fingerprint(
+    provisions: Sequence[LegalProvision], *, legacy_compatible: bool = False
+) -> str:
+    """Hash complete records, with an explicit compatibility path for Phase 5.1-only input."""
+    legacy = legacy_compatible and all(
+        p.model_fields_set <= _PHASE_5_1_PROVISION_FIELDS for p in provisions
+    )
+    records = [
+        p.model_dump(mode="json", include=_PHASE_5_1_PROVISION_FIELDS if legacy else None)
+        for p in provisions
+    ]
+    records.sort(key=lambda record: record["provision_id"])
+    payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def is_valid_official_url(url: str) -> bool:

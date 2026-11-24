@@ -1,201 +1,310 @@
-"""Secure source acquisition and content-addressed snapshot storage (T-03 / ADR-006).
-
-Provides automated HTTPS acquisition from allowlisted UAE government domains with TLS
-peer certificate fingerprint extraction, bounded streaming, atomic file storage,
-corruption detection, and manual operator attestation ingestion.
-"""
+"""Bounded source acquisition and attested local capture (T-03 / ADR-006)."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import json
+import math
 import os
 import re
-import socket
 import ssl
+import stat
 import sys
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal
-from urllib.parse import urljoin, urlparse
+from typing import TYPE_CHECKING, Literal
+from urllib.parse import urljoin, urlsplit
 
+from ..ingestion import ALLOWED_OFFICIAL_HOSTNAMES
 from ..models import (
     AuthenticityTier,
+    HttpAcquisitionEvidence,
     LegalSource,
     ManualAttestation,
     RedistributionClearance,
 )
-
-UNRETRIEVED_UPSTREAM_PDF_GATE: str = "UNRETRIEVED_UPSTREAM_PDF_GATE"
-
-APPROVED_GOVERNMENT_DOMAINS: frozenset[str] = frozenset(
-    {
-        "mohre.gov.ae",
-        "www.mohre.gov.ae",
-        "uaelegislation.gov.ae",
-        "www.uaelegislation.gov.ae",
-    }
+from .storage import (
+    AcquisitionError,
+    SecurityPolicyViolationError,
+    SnapshotIntegrityError,
+    compute_snapshot_path,
+    persist_acquisition,
+    store_snapshot,
 )
 
-MAX_ACQUISITION_BYTES: int = 50_000_000  # 50 MB
-DEFAULT_TIMEOUT_SECONDS: float = 30.0
+if TYPE_CHECKING:
+    import httpx
 
+__all__ = [
+    "UNRETRIEVED_UPSTREAM_PDF_GATE",
+    "AcquisitionError",
+    "SecurityPolicyViolationError",
+    "SnapshotIntegrityError",
+    "acquire_from_url",
+    "compute_snapshot_path",
+    "ingest_local",
+    "is_approved_government_url",
+    "store_snapshot",
+]
 
-class AcquisitionError(Exception):
-    """Base exception for source acquisition failures."""
-
-
-class SecurityPolicyViolationError(AcquisitionError):
-    """Raised when an acquisition request violates security or governance policies."""
-
-
-class SnapshotIntegrityError(AcquisitionError):
-    """Raised when snapshot checksum mismatch or storage corruption is detected."""
+UNRETRIEVED_UPSTREAM_PDF_GATE = "UNRETRIEVED_UPSTREAM_PDF_GATE"
+MAX_ACQUISITION_BYTES = 50_000_000
+DEFAULT_TIMEOUT_SECONDS = 30.0
+DEFAULT_SNAPSHOT_DIR = Path("data/official_sources/.acquisition")
+_MAX_REDIRECTS = 5
+_HEADERS = (
+    "content-type",
+    "content-length",
+    "content-encoding",
+    "transfer-encoding",
+    "etag",
+    "last-modified",
+    "date",
+)
+ArtifactType = Literal["raw_pdf", "raw_html"]
+SourceRole = Literal["extraction_primary", "archival_reference"]
+_CONTENT_TYPES: dict[ArtifactType, Literal["application/pdf", "text/html"]] = {
+    "raw_pdf": "application/pdf",
+    "raw_html": "text/html",
+}
 
 
 def is_approved_government_url(url: str) -> bool:
-    """Validate that a URL strictly targets an approved UAE government portal over HTTPS.
-
-    Rejects insecure schemes, deceptive domains (e.g. mohre.gov.ae.evil.com),
-    non-standard ports, user credentials in authority, and malformed URLs.
-    """
-    if not url or not isinstance(url, str):
+    """Require an exact HTTPS origin and reject ambiguous URL syntax."""
+    if not isinstance(url, str) or any(
+        ord(char) <= 32 or ord(char) >= 127 or char in "\\#" for char in url
+    ):
         return False
     try:
-        parsed = urlparse(url)
-        if parsed.scheme != "https":
-            return False
-        if not parsed.hostname:
-            return False
-        hostname = parsed.hostname.lower()
-        if hostname not in APPROVED_GOVERNMENT_DOMAINS:
-            return False
-        if parsed.port is not None and parsed.port != 443:
-            return False
-        if parsed.username or parsed.password:
-            return False
-        return True
-    except Exception:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        return (
+            parsed.scheme == "https"
+            and host in ALLOWED_OFFICIAL_HOSTNAMES
+            and parsed.netloc.lower() in {host, f"{host}:443"}
+        )
+    except ValueError:
         return False
 
 
-def get_tls_peer_cert_fingerprint(
-    hostname: str,
-    port: int = 443,
-    timeout_seconds: float = 10.0,
-) -> str:
-    """Connect to hostname via TLS, verify certificates, and return SHA-256 fingerprint.
-
-    Returns:
-        Formatted fingerprint string matching pattern '^SHA256:[a-fA-F0-9]{64}$'.
-    """
-    context = ssl.create_default_context()
-    try:
-        with socket.create_connection((hostname, port), timeout=timeout_seconds) as sock:
-            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
-                cert_der = ssock.getpeercert(binary_form=True)
-                if not cert_der:
-                    raise AcquisitionError(f"Could not retrieve peer certificate for {hostname}")
-                sha256_hex = hashlib.sha256(cert_der).hexdigest().lower()
-                return f"SHA256:{sha256_hex}"
-    except ssl.SSLError as exc:
-        raise AcquisitionError(
-            f"TLS certificate verification failed for {hostname}: {exc}"
-        ) from exc
-    except Exception as exc:
-        raise AcquisitionError(
-            f"Network error obtaining TLS certificate for {hostname}: {exc}"
-        ) from exc
-
-
-def compute_snapshot_path(base_dir: Path, sha256_hash: str, ext: str) -> Path:
-    """Compute content-addressed snapshot target path: base_dir/snapshots/<hash[:2]>/<hash>.<ext>.
-
-    Enforces strict SHA-256 formatting and path traversal safety.
-    """
-    sha256_clean = sha256_hash.strip().lower()
-    if not re.match(r"^[a-f0-9]{64}$", sha256_clean):
-        raise SnapshotIntegrityError(f"Invalid SHA-256 digest format: {sha256_hash}")
-
-    clean_ext = ext.lstrip(".").lower().strip()
-    if not clean_ext or not re.match(r"^[a-z0-9]+$", clean_ext):
-        raise ValueError(f"Invalid file extension: {ext}")
-
-    resolved_base = base_dir.resolve()
-    target_path = (
-        resolved_base / "snapshots" / sha256_clean[:2] / f"{sha256_clean}.{clean_ext}"
-    ).resolve()
-
-    try:
-        target_path.relative_to(resolved_base)
-    except ValueError as exc:
+def _require_approved_url(url: str) -> None:
+    if not is_approved_government_url(url):
         raise SecurityPolicyViolationError(
-            f"Path traversal detected: {target_path} is outside base directory {resolved_base}"
-        ) from exc
-
-    return target_path
+            "URL or redirect target violates approved UAE government portal HTTPS policy"
+        )
 
 
-def store_snapshot(
-    content_bytes: bytes,
-    snapshot_dir: Path,
-    ext: str,
-    expected_sha256: str | None = None,
-) -> tuple[Path, str]:
-    """Store content bytes atomically into content-addressed snapshot layout.
+def _validate_staging(source_id: str, document_id: str, clearance: RedistributionClearance) -> None:
+    if any(value.upper().startswith("SYNTHETIC_TEST_ONLY") for value in (source_id, document_id)):
+        raise SecurityPolicyViolationError("Synthetic fixtures cannot enter acquisition staging")
+    if clearance not in (
+        RedistributionClearance.PENDING_REVIEW,
+        RedistributionClearance.RESTRICTED_DO_NOT_COMMIT,
+    ):
+        raise SecurityPolicyViolationError("Acquisition cannot grant redistribution clearance")
 
-    Detects existing corruption and ensures idempotent writes.
 
-    Returns:
-        tuple of (absolute_file_path, computed_sha256_digest)
-    """
-    computed_sha256 = hashlib.sha256(content_bytes).hexdigest().lower()
+def _peer_fingerprint(response: httpx.Response) -> str:
+    stream = response.extensions.get("network_stream")
+    peer = stream.get_extra_info("ssl_object") if stream is not None else None
+    context = getattr(peer, "context", None)
+    if (
+        peer is None
+        or not isinstance(context, ssl.SSLContext)
+        or context.verify_mode != ssl.CERT_REQUIRED
+        or not context.check_hostname
+    ):
+        raise AcquisitionError("Missing verified TLS evidence from the response transport")
+    certificate = peer.getpeercert(True)
+    if not certificate:
+        raise AcquisitionError("Missing TLS peer certificate from the response transport")
+    return "SHA256:" + hashlib.sha256(certificate).hexdigest()
 
-    if expected_sha256 is not None:
-        clean_expected = expected_sha256.strip().lower()
-        if clean_expected != computed_sha256:
-            raise SnapshotIntegrityError(
-                f"Checksum mismatch: expected {clean_expected}, computed {computed_sha256}"
-            )
 
-    target_path = compute_snapshot_path(snapshot_dir, computed_sha256, ext)
+def _read_response(response: httpx.Response, max_bytes: int) -> bytes:
+    if response.headers.get("content-encoding", "identity").lower() != "identity":
+        raise AcquisitionError(
+            "Compressed responses are unsupported by the exact-byte capture policy"
+        )
+    if "content-range" in response.headers:
+        raise AcquisitionError("Partial HTTP response")
+    length = response.headers.get("content-length")
+    if length is not None and not re.fullmatch(r"[0-9]+", length):
+        raise AcquisitionError("Invalid HTTP Content-Length")
+    if length is not None and (len(length) > 20 or int(length) > max_bytes):
+        raise AcquisitionError(f"Response exceeds maximum limit of {max_bytes} bytes")
 
-    if target_path.exists():
-        existing_bytes = target_path.read_bytes()
-        existing_sha256 = hashlib.sha256(existing_bytes).hexdigest().lower()
-        if existing_sha256 != computed_sha256:
-            raise SnapshotIntegrityError(
-                f"Snapshot corruption detected at existing file {target_path}: "
-                f"expected {computed_sha256}, got {existing_sha256}"
-            )
-        return target_path, computed_sha256
+    content = bytearray()
+    for chunk in response.iter_raw():
+        if len(content) + len(chunk) > max_bytes:
+            raise AcquisitionError(f"Response exceeds maximum limit of {max_bytes} bytes")
+        content.extend(chunk)
+    if length is not None and len(content) != int(length):
+        raise AcquisitionError("Incomplete HTTP response")
+    return bytes(content)
 
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = target_path.parent / f"{target_path.name}.tmp_{uuid.uuid4().hex}"
+
+def _fetch(
+    url: str, artifact_type: ArtifactType, max_bytes: int, timeout_seconds: float
+) -> tuple[bytes, str, HttpAcquisitionEvidence]:
+    import httpx
+
+    history: list[str] = []
+    expected_type = _CONTENT_TYPES[artifact_type]
+    current_url = url
     try:
-        tmp_path.write_bytes(content_bytes)
-        os.replace(tmp_path, target_path)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-        raise
+        # Keep certificate trust, proxy configuration and redirect control inside the boundary.
+        with httpx.Client(verify=True, trust_env=False, timeout=timeout_seconds) as client:
+            while True:
+                _require_approved_url(current_url)
+                with client.stream(
+                    "GET",
+                    current_url,
+                    follow_redirects=False,
+                    headers={"Accept-Encoding": "identity", "Accept": expected_type},
+                ) as response:
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location:
+                            raise AcquisitionError("Redirect missing Location header")
+                        if len(history) == _MAX_REDIRECTS:
+                            raise AcquisitionError("Exceeded maximum redirects")
+                        # urljoin() can discard control characters before URL validation.
+                        if any(
+                            ord(char) <= 32 or ord(char) >= 127 or char == "\\" for char in location
+                        ):
+                            raise SecurityPolicyViolationError("Invalid HTTP redirect location")
+                        history.append(current_url)
+                        current_url = urljoin(current_url, location)
+                        continue
+                    if response.status_code == 403:
+                        raise AcquisitionError(
+                            f"HTTP 403 Forbidden: {UNRETRIEVED_UPSTREAM_PDF_GATE}"
+                        )
+                    if response.status_code != 200:
+                        raise AcquisitionError(f"Unexpected HTTP status {response.status_code}")
+                    content_types = response.headers.get_list("content-type")
+                    mime = (
+                        content_types[0].split(";", 1)[0].strip().lower()
+                        if len(content_types) == 1
+                        else ""
+                    )
+                    if mime != expected_type:
+                        raise AcquisitionError(
+                            f"Expected Content-Type {expected_type}, got {mime!r}"
+                        )
+                    fingerprint = _peer_fingerprint(response)
+                    content = _read_response(response, max_bytes)
+                    evidence = HttpAcquisitionEvidence(
+                        final_url=current_url,
+                        redirect_history=tuple(history),
+                        status_code=200,
+                        content_type=expected_type,
+                        response_headers={
+                            key: response.headers[key]
+                            for key in _HEADERS
+                            if key in response.headers
+                        },
+                    )
+                    return content, fingerprint, evidence
+    except (httpx.HTTPError, httpx.InvalidURL, ssl.SSLError) as exc:
+        raise AcquisitionError(f"HTTPS acquisition failed: {exc}") from exc
 
-    return target_path, computed_sha256
 
-
-def _extract_page_count_if_pdf(content_bytes: bytes) -> int | None:
-    """Attempt to extract page count from PDF bytes using PyMuPDF if available."""
-    if not content_bytes.startswith(b"%PDF-"):
-        return None
-    try:
+def _validate_artifact(content: bytes, artifact_type: ArtifactType) -> int | None:
+    if artifact_type == "raw_pdf":
         import pymupdf
 
-        with pymupdf.open(stream=content_bytes, filetype="pdf") as doc:
-            return int(len(doc))
-    except Exception:
+        if not re.match(rb"%PDF-[12]\.[0-9][\r\n]", content) or not content.rstrip().endswith(
+            b"%%EOF"
+        ):
+            raise AcquisitionError("Missing PDF header or end-of-file marker")
+        try:
+            with pymupdf.open(stream=content, filetype="pdf") as document:
+                if (
+                    document.is_pdf
+                    and not document.is_repaired
+                    and not document.is_encrypted
+                    and document.page_count
+                ):
+                    return int(document.page_count)
+        except (ValueError, RuntimeError) as exc:
+            raise AcquisitionError("Malformed PDF") from exc
+        raise AcquisitionError("Malformed, encrypted or empty PDF")
+
+    if artifact_type == "raw_html":
+        from lxml import etree
+
+        head = content[:2048].removeprefix(b"\xef\xbb\xbf").lstrip()
+        if not re.match(rb"(?:<!doctype\s+html\b[^>]*>\s*)?<html(?:\s|>)", head, re.I):
+            raise AcquisitionError("Missing HTML document start")
+        if not re.search(rb"</html\s*>\s*$", content[-2048:], re.I):
+            raise AcquisitionError("Missing HTML document end")
+        # These are portal challenge markers. Shape checks establish no legal-content identity.
+        if re.search(
+            rb"cf-chl-|/cdn-cgi/challenge-platform/|<title>\s*(?:just a moment|access denied|attention required)",
+            content,
+            re.I,
+        ):
+            raise AcquisitionError("HTML challenge or access error page")
+        try:
+            parsed = etree.HTML(content, etree.HTMLParser(no_network=True))
+        except etree.LxmlError as exc:
+            raise AcquisitionError("Malformed HTML document") from exc
+        if parsed is None or parsed.tag != "html" or parsed.find("body") is None:
+            raise AcquisitionError("Malformed HTML document")
         return None
+
+    raise ValueError(f"Unsupported artifact_type: {artifact_type}")
+
+
+def _accept(
+    content: bytes,
+    root: Path,
+    *,
+    source_id: str,
+    document_id: str,
+    language: Literal["en", "ar"],
+    publisher: str,
+    url: str,
+    is_authoritative: bool,
+    artifact_type: ArtifactType,
+    source_role: SourceRole,
+    clearance: RedistributionClearance,
+    attestation: ManualAttestation | None = None,
+    fingerprint: str | None = None,
+    evidence: HttpAcquisitionEvidence | None = None,
+) -> LegalSource:
+    digest = hashlib.sha256(content).hexdigest()
+    if attestation is not None and digest != attestation.captured_sha256.lower():
+        raise SnapshotIntegrityError("Checksum mismatch: file does not match the attested SHA-256")
+    pages = _validate_artifact(content, artifact_type)
+    path = compute_snapshot_path(root, digest, "pdf" if artifact_type == "raw_pdf" else "html")
+    source = LegalSource(
+        source_id=source_id,
+        document_id=document_id,
+        language=language,
+        publisher=publisher,
+        source_url=url,
+        local_path=path.relative_to(root.resolve()).as_posix(),
+        retrieved_at=attestation.acquired_at_utc if attestation else datetime.now(timezone.utc),
+        sha256=digest,
+        page_count=pages,
+        is_authoritative=is_authoritative,
+        artifact_type=artifact_type,
+        source_role=source_role,
+        extraction_method="manual"
+        if attestation
+        else ("pdf_text" if artifact_type == "raw_pdf" else "html_dom"),
+        authenticity_tier=AuthenticityTier.OPERATOR_ATTESTED_ONLY
+        if attestation
+        else AuthenticityTier.GOV_AUTOMATED_TLS_VERIFIED,
+        attestation_id=attestation.attestation_id if attestation else None,
+        tls_cert_fingerprint=fingerprint,
+        http_capture=evidence,
+        redistribution_clearance=clearance,
+    )
+    return persist_acquisition(root, source, content, attestation)
 
 
 def acquire_from_url(
@@ -206,141 +315,39 @@ def acquire_from_url(
     is_authoritative: bool,
     snapshot_dir: Path,
     *,
-    artifact_type: Literal["raw_pdf", "raw_html"] = "raw_pdf",
-    source_role: Literal["extraction_primary", "archival_reference"] = "extraction_primary",
+    artifact_type: ArtifactType = "raw_pdf",
+    source_role: SourceRole = "extraction_primary",
     redistribution_clearance: RedistributionClearance = RedistributionClearance.PENDING_REVIEW,
     publisher: str = "UAE Official Portal",
     max_bytes: int = MAX_ACQUISITION_BYTES,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-    client: Any | None = None,
-    cert_fingerprint_fn: Callable[[str, int, float], str] | None = None,
 ) -> LegalSource:
-    """Acquire official legal source artifact over HTTPS with peer cert fingerprinting.
-
-    Enforces allowlisted domain checks, bounded streaming, redirect checking,
-    content magic bytes, and atomic snapshot storage.
-    """
-    if not is_approved_government_url(url):
-        raise SecurityPolicyViolationError(
-            f"URL '{url}' does not point to an approved UAE government portal via HTTPS"
-        )
-
+    """Capture bytes and certificate evidence from a verified, owned HTTPS transport."""
+    _require_approved_url(url)
+    _validate_staging(source_id, document_id, redistribution_clearance)
+    if (
+        not 0 < max_bytes <= MAX_ACQUISITION_BYTES
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise ValueError("Acquisition needs a positive finite timeout and a bounded size limit")
     if is_authoritative and language != "ar":
         raise ValueError("Authoritative legal sources must be Arabic ('ar')")
-
-    parsed_url = urlparse(url)
-    hostname = parsed_url.hostname or ""
-    port = parsed_url.port or 443
-
-    fingerprint_getter = cert_fingerprint_fn or get_tls_peer_cert_fingerprint
-    cert_fingerprint = fingerprint_getter(hostname, port, timeout_seconds)
-
-    import httpx
-
-    close_client = False
-    if client is None:
-        client = httpx.Client(
-            follow_redirects=False,
-            verify=True,
-            timeout=timeout_seconds,
-        )
-        close_client = True
-
-    try:
-        current_url = url
-        redirect_count = 0
-        max_redirects = 5
-
-        while True:
-            response = client.get(current_url)
-
-            if response.status_code in {301, 302, 303, 307, 308}:
-                redirect_count += 1
-                if redirect_count > max_redirects:
-                    raise AcquisitionError(
-                        f"Exceeded maximum redirects ({max_redirects}) fetching {url}"
-                    )
-                location = response.headers.get("location")
-                if not location:
-                    raise AcquisitionError(
-                        f"Redirect response from {current_url} missing Location header"
-                    )
-                next_url = urljoin(current_url, location)
-                if not is_approved_government_url(next_url):
-                    raise SecurityPolicyViolationError(
-                        f"Redirect target '{next_url}' violates approved government domain policy"
-                    )
-                current_url = next_url
-                continue
-
-            if response.status_code == 403:
-                raise AcquisitionError(
-                    f"HTTP 403 Forbidden received from {current_url}. "
-                    "Endpoint is protected by bot challenge/WAF. Mark as UNRETRIEVED_UPSTREAM_PDF_GATE."
-                )
-
-            if response.status_code != 200:
-                raise AcquisitionError(
-                    f"HTTP request to {current_url} failed with status code {response.status_code}"
-                )
-
-            # Check bounded size
-            content = response.content
-            if len(content) > max_bytes:
-                raise AcquisitionError(
-                    f"Response size ({len(content)} bytes) exceeds maximum limit of {max_bytes} bytes"
-                )
-
-            break
-    finally:
-        if close_client:
-            client.close()
-
-    # Validate content magic bytes / structure
-    if artifact_type == "raw_pdf":
-        if not content.startswith(b"%PDF-"):
-            raise AcquisitionError(
-                "Response content does not contain valid PDF magic bytes (%PDF-). "
-                "Possible HTML challenge or portal error returned."
-            )
-        ext = "pdf"
-        extraction_method: Literal["manual", "html_dom", "pdf_text", "ocr"] = "pdf_text"
-    elif artifact_type == "raw_html":
-        lower_head = content[:2048].lower()
-        if b"<html" not in lower_head and b"<!doctype html" not in lower_head:
-            raise AcquisitionError("Response content does not contain valid HTML document tags.")
-        ext = "html"
-        extraction_method = "html_dom"
-    else:
-        raise ValueError(f"Unsupported artifact_type: {artifact_type}")
-
-    stored_path, sha256_hash = store_snapshot(content, snapshot_dir, ext=ext)
-    page_count = _extract_page_count_if_pdf(content) if ext == "pdf" else None
-
-    # Compute relative path from repo root or parent if feasible, else absolute
-    try:
-        local_path_str = str(stored_path.relative_to(Path.cwd()))
-    except ValueError:
-        local_path_str = str(stored_path)
-
-    return LegalSource(
+    content, fingerprint, evidence = _fetch(url, artifact_type, max_bytes, timeout_seconds)
+    return _accept(
+        content,
+        snapshot_dir,
         source_id=source_id,
         document_id=document_id,
         language=language,
         publisher=publisher,
-        source_url=url,
-        local_path=local_path_str.replace("\\", "/"),
-        retrieved_at=datetime.now(timezone.utc),
-        sha256=sha256_hash,
-        page_count=page_count,
+        url=url,
         is_authoritative=is_authoritative,
         artifact_type=artifact_type,
         source_role=source_role,
-        extraction_method=extraction_method,
-        authenticity_tier=AuthenticityTier.GOV_AUTOMATED_TLS_VERIFIED,
-        attestation_id=None,
-        tls_cert_fingerprint=cert_fingerprint,
-        redistribution_clearance=redistribution_clearance,
+        clearance=redistribution_clearance,
+        fingerprint=fingerprint,
+        evidence=evidence,
     )
 
 
@@ -353,85 +360,64 @@ def ingest_local(
     is_authoritative: bool,
     snapshot_dir: Path,
     *,
-    artifact_type: Literal["raw_pdf", "raw_html"] = "raw_pdf",
-    source_role: Literal["extraction_primary", "archival_reference"] = "extraction_primary",
+    artifact_type: ArtifactType = "raw_pdf",
+    source_role: SourceRole = "extraction_primary",
     redistribution_clearance: RedistributionClearance = RedistributionClearance.PENDING_REVIEW,
 ) -> LegalSource:
-    """Ingest a locally provided file with a validated ManualAttestation record.
-
-    Assigns GOV_INDEPENDENTLY_CORROBORATED if cross-check passed, else OPERATOR_ATTESTED_ONLY.
-    """
-    resolved_file = file_path.resolve()
-    if not resolved_file.exists() or not resolved_file.is_file():
-        raise AcquisitionError(f"Local file does not exist or is not a file: {file_path}")
-
-    if not is_approved_government_url(attestation.claimed_source_url):
+    """Bind exact input bytes to an operator's attestation and staging record."""
+    # Revalidate the record at the trust boundary, including model_copy() callers.
+    attestation = ManualAttestation.model_validate(attestation.model_dump())
+    _require_approved_url(attestation.claimed_source_url)
+    _validate_staging(attestation.source_id, document_id, redistribution_clearance)
+    if attestation.attestation_id.upper().startswith("SYNTHETIC_TEST_ONLY"):
         raise SecurityPolicyViolationError(
-            f"Attestation claimed_source_url '{attestation.claimed_source_url}' "
-            "does not target an approved UAE government portal via HTTPS"
+            "Synthetic attestations cannot enter acquisition staging"
         )
-
+    if attestation.document_id != document_id:
+        raise SecurityPolicyViolationError(
+            "Attested document_id contradicts the requested document"
+        )
     if is_authoritative and language != "ar":
         raise ValueError("Authoritative legal sources must be Arabic ('ar')")
 
-    content = resolved_file.read_bytes()
-    if len(content) > MAX_ACQUISITION_BYTES:
-        raise AcquisitionError(
-            f"File size ({len(content)} bytes) exceeds maximum limit of {MAX_ACQUISITION_BYTES} bytes"
-        )
-
-    if artifact_type == "raw_pdf":
-        if not content.startswith(b"%PDF-"):
-            raise AcquisitionError("Provided file does not contain valid PDF magic bytes (%PDF-)")
-        ext = "pdf"
-        page_count = _extract_page_count_if_pdf(content)
-    elif artifact_type == "raw_html":
-        lower_head = content[:2048].lower()
-        if b"<html" not in lower_head and b"<!doctype html" not in lower_head:
-            raise AcquisitionError("Provided file does not contain valid HTML document tags")
-        ext = "html"
-        page_count = None
-    else:
-        raise ValueError(f"Unsupported artifact_type: {artifact_type}")
-
-    stored_path, sha256_hash = store_snapshot(content, snapshot_dir, ext=ext)
-
-    tier = (
-        AuthenticityTier.GOV_INDEPENDENTLY_CORROBORATED
-        if attestation.independent_cross_check_passed
-        else AuthenticityTier.OPERATOR_ATTESTED_ONLY
-    )
-
     try:
-        local_path_str = str(stored_path.relative_to(Path.cwd()))
-    except ValueError:
-        local_path_str = str(stored_path)
+        if not file_path.is_file():
+            raise AcquisitionError(
+                f"Local file does not exist or is not a regular file: {file_path}"
+            )
+        with file_path.open("rb") as file:
+            info = os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise AcquisitionError("Local input is not a regular file")
+            if info.st_size > MAX_ACQUISITION_BYTES:
+                raise AcquisitionError("Local file exceeds maximum size")
+            content = file.read(MAX_ACQUISITION_BYTES + 1)
+            if len(content) > MAX_ACQUISITION_BYTES:
+                raise AcquisitionError("Local file exceeds maximum size")
+    except OSError as exc:
+        raise AcquisitionError(f"Could not read local capture: {exc}") from exc
 
-    return LegalSource(
+    # Operator-supplied corroboration is kept as an assertion for later review.
+    return _accept(
+        content,
+        snapshot_dir,
         source_id=attestation.source_id,
         document_id=document_id,
         language=language,
         publisher=publisher,
-        source_url=attestation.claimed_source_url,
-        local_path=local_path_str.replace("\\", "/"),
-        retrieved_at=attestation.acquired_at_utc,
-        sha256=sha256_hash,
-        page_count=page_count,
+        url=attestation.claimed_source_url,
         is_authoritative=is_authoritative,
         artifact_type=artifact_type,
         source_role=source_role,
-        extraction_method="manual",
-        authenticity_tier=tier,
-        attestation_id=attestation.attestation_id,
-        tls_cert_fingerprint=None,
-        redistribution_clearance=redistribution_clearance,
+        clearance=redistribution_clearance,
+        attestation=attestation,
     )
 
 
 def build_cli_parser() -> argparse.ArgumentParser:
     """Build CLI parser for corpus acquisition workflows."""
     parser = argparse.ArgumentParser(
-        prog="python -m uae_lexagent.corpus.acquisition",
+        prog="python -m uae_lexagent.corpus",
         description="Secure official source acquisition and snapshot management.",
     )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
@@ -463,8 +449,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     acquire_parser.add_argument(
         "--snapshot-dir",
         type=Path,
-        default=Path("data/official_sources"),
-        help="Base directory for snapshot storage",
+        default=DEFAULT_SNAPSHOT_DIR,
+        help="Private staging directory for snapshots and acquisition evidence",
     )
 
     # ingest-local subcommand
@@ -492,8 +478,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument(
         "--snapshot-dir",
         type=Path,
-        default=Path("data/official_sources"),
-        help="Base directory for snapshot storage",
+        default=DEFAULT_SNAPSHOT_DIR,
+        help="Private staging directory for snapshots and acquisition evidence",
     )
 
     return parser
@@ -522,9 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         elif args.subcommand == "ingest-local":
-            with args.attestation.open("r", encoding="utf-8") as f:
-                attestation_data = json.load(f)
-            attestation = ManualAttestation.model_validate(attestation_data)
+            attestation = ManualAttestation.model_validate_json(args.attestation.read_bytes())
 
             source = ingest_local(
                 file_path=args.file,

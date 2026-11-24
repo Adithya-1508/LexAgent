@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from datetime import datetime
 from typing import Sequence
 
+from ..ingestion import compute_corpus_fingerprint
 from ..models import LegalProvision
 from .contracts import IndexedProvision
 from .embeddings import EmbeddingProvider
@@ -98,22 +97,11 @@ def build_retrieval_index(
     store.upsert(indexed_records)
     bm25.build(provision_list)
 
-    # 3. Compute the same canonical corpus fingerprint used by benchmark validation.
-    records = [p.model_dump(mode="json") for p in provision_list]
-    records.sort(key=lambda record: record["provision_id"])
-    payload = json.dumps(
-        records,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    corpus_fingerprint = hashlib.sha256(payload).hexdigest()
-
     return RetrievalIndex(
         vector_store=store,
         sparse_index=bm25,
         provisions=provision_list,
         embedding_provider=embedding_provider,
-        corpus_fingerprint=corpus_fingerprint,
+        corpus_fingerprint=compute_corpus_fingerprint(provision_list, legacy_compatible=True),
         corpus_version=corpus_version,
     )
