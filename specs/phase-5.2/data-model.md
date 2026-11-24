@@ -38,6 +38,8 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
   - `attestation_id: str | None = None`
   - `tls_cert_fingerprint: str | None = None`
   - `redistribution_clearance: Literal["verified_public_law", "restricted_do_not_commit", "pending_review"] = "pending_review"`
+  - `http_capture` optionally serializes the final URL, ordered pre-redirect request URLs, HTTP status, media type and selected response headers. Every new automated capture writes it with the response-associated TLS fingerprint. Existing records and synthetic schema fixtures can omit it.
+- **`ManualAttestation` byte binding:** `captured_sha256` records the SHA-256 of the original downloaded file at capture time. `document_id` binds the operator assertion to the canonical document along with the existing `source_id` and `claimed_source_url`. Both fields are required because the previous shape could identify an attestation without identifying the exact bytes or the asserted document. Capture records missing either field require a new attestation. Operator-entered corroboration remains an operator assertion. M5.2.1 has no independent corroboration verifier or promotion path.
 - **`LegalDocument` additions:**
   - `gazette_number: str | None = None`
   - `completeness: DocumentCompleteness = DocumentCompleteness.PARTIAL_MVP`
@@ -88,7 +90,7 @@ All existing models retain `ConfigDict(extra="forbid")`. Every new field has a s
 
 ### 3.2 Canonical Corpus Fingerprint vs. Release Manifest Digest
 To prevent semantic conflation between corpus content integrity and manifest file metadata:
-1. **Canonical Corpus Fingerprint (`canonical_corpus_fingerprint`):** Defined strictly per `loader.py` and `indexing.py` as the deterministic SHA-256 digest of canonical JSON serialization of all sorted `LegalProvision` records:
+1. **Canonical Corpus Fingerprint (`canonical_corpus_fingerprint`):** The deterministic SHA-256 digest of canonical JSON serialization of all sorted `LegalProvision` records. For Phase 5.2 release integrity, call `compute_corpus_fingerprint(provisions)`:
 ```python
 records = [provision.model_dump(mode="json") for provision in provisions]
 records.sort(key=lambda record: record["provision_id"])
@@ -97,12 +99,25 @@ payload = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",
 )
 corpus_fingerprint = hashlib.sha256(payload).hexdigest()
 ```
+The existing benchmark and indexing callers preserve the Phase 5.1 fingerprint when every input supplied only Phase 5.1 fields. Supplying any Phase 5.2 field, including its default, selects the complete payload. Ordinary model serialization always includes provenance fields. Legacy unverified provisions may retain a missing effective date, while an in-force provision with a non-legacy publication state requires one.
 2. **Release Manifest Digest (`release_manifest_digest`):** Defined separately as the direct SHA-256 digest of `release_manifest.json` on disk, binding all document artifact checksums, claim-key registry checksums, and publication ledgers.
 
 ### 3.3 Synthetic Fixture Integrity & Non-Publication Isolation
 Synthetic fixtures in `specs/phase-5.2/fixtures/` carry `SYNTHETIC_TEST_ONLY_...` identifiers and `release_version: "5.2.0-synthetic-test.1"`.
 - **Shape-Only Classification:** Fixture hash values and simulated TLS cert fingerprints in test fixtures are classified strictly as shape-only unit-testing data with zero claim of official government origin or production integrity.
 - **Strict Publication Isolation:** Synthetic fixtures are prohibited from ever being accepted as release verification evidence or published into production indices. Simulated government source acquisitions are strictly test doubles, never real verified provenance.
+
+### 3.4 M5.2.1 Acquisition Staging
+
+`python -m uae_lexagent.corpus acquire` and `ingest-local` write `snapshots/`, `manifest.json`, and `attestations.json` under the Git-ignored `data/.acquisition/` directory by default. `--snapshot-dir` can point to a private directory outside a checkout. Within a checkout, acquisition is confined to the staging directory and its descendants. The production `data/official_sources/` tree and all its descendants are excluded from acquisition, including in archives without `.git` metadata. Existing data under the former `data/official_sources/.acquisition/` location remains Git-ignored. Manifest paths are relative to the staging root. Acquisition accepts pending and restricted redistribution dispositions. Approval and corpus publication belong to release tooling.
+
+Automated capture uses the HTTP client's normal CA bundle and hostname verification, with environment proxies and CA overrides disabled. It follows up to five individually allowlisted HTTPS redirects. The final response supplies the leaf certificate fingerprint and the bytes. The client requests identity encoding and rejects compressed, partial or oversized bodies. Its timeout is a per-I/O inactivity timeout. MIME and basic PDF/HTML structure checks can reject malformed files and known portal challenge pages. They establish neither legal-content identity nor extraction fidelity. Loopback HTTPS tests generate ephemeral certificates with OpenSSL and never contact upstream portals.
+
+The manual CLI accepts attestation JSON from a regular file up to 64 KiB, independently of the 50 MB PDF/HTML artifact limit. It rejects oversized input before parsing. External JSON timestamps include seconds and a timezone under the RFC 3339 date-time contract. Extraction fidelity scores use JSON numbers within the existing bounds.
+
+The source snapshot schema checks the PDF and HTML media-type pairings. With no redirects, `source_url` must equal `http_capture.final_url`. With redirects, `source_url` must equal the first entry in `redirect_history`. Both comparisons are mandatory runtime invariants because standard JSON Schema cannot compare arbitrary sibling property values.
+
+The staging root and its directory topology must be protected against modification by actors outside the acquisition process and cooperating writers. Publication rejects symlinks, Windows reparse points and non-regular targets under that root. The snapshot is created without overwrite by same-directory rename on Windows and hard link on Linux. Existing content is accepted only after verification. Writers serialize manifest updates, and the manifest is published only after the snapshot and linked attestation. A crash or I/O failure can leave unreferenced cache bytes or temporary files. Only manifest-linked captures are accepted. A retry verifies existing bytes and attestation linkage. On supported POSIX filesystems it also synchronizes the manifest's directory before returning success, including after a failure following manifest replacement. Windows uses file flushing and atomic visibility with no claim of multi-file power-loss durability.
 
 ---
 

@@ -60,7 +60,8 @@ Optional component extras:
 - Retrieval: `pip install -e ".[retrieval,qdrant]"`
 - Embeddings: `pip install -e ".[embeddings]"`
 - Agent & LangGraph: `pip install -e ".[agent]"`
-- All optional extras: `pip install -e ".[dev,retrieval,qdrant,embeddings,openai,agent]"`
+- Corpus acquisition and its tests: `pip install -e ".[dev,corpus]"`. The loopback HTTPS tests use `openssl` on `PATH`.
+- All optional extras: `pip install -e ".[dev,retrieval,qdrant,embeddings,openai,agent,corpus]"`
 
 ## Development and CI
 

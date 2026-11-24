@@ -7,6 +7,8 @@
   "required": [
     "attestation_id",
     "source_id",
+    "document_id",
+    "captured_sha256",
     "operator_id",
     "acquired_at_utc",
     "claimed_source_url",
@@ -24,6 +26,14 @@
     "source_id": {
       "type": "string",
       "minLength": 1
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captured_sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
     },
     "operator_id": {
       "type": "string",

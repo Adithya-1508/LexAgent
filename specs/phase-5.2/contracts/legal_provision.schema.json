@@ -280,9 +280,13 @@
             "const": "in_force"
           }
         },
-        "required": [
-          "lifecycle_state"
-        ]
+        "not": {
+          "properties": {
+            "publication_state": {
+              "const": "LEGACY_UNVERIFIED"
+            }
+          }
+        }
       },
       "then": {
         "required": [
@@ -367,7 +371,10 @@
             "type": "array",
             "minItems": 1
           }
-        }
+        },
+        "required": [
+          "caveat_codes"
+        ]
       }
     },
     {

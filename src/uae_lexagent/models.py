@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 
 class Language(str, Enum):
@@ -31,10 +41,153 @@ class SourceType(str, Enum):
     USER_PROVIDED = "user_provided"
 
 
-class LegalSource(BaseModel):
-    """Manifest record tracking provenance and integrity of a raw official document."""
+class AuthenticityTier(str, Enum):
+    GOV_AUTOMATED_TLS_VERIFIED = "GOV_AUTOMATED_TLS_VERIFIED"
+    GOV_INDEPENDENTLY_CORROBORATED = "GOV_INDEPENDENTLY_CORROBORATED"
+    OPERATOR_ATTESTED_ONLY = "OPERATOR_ATTESTED_ONLY"
+    LEGACY_UNATTESTED = "LEGACY_UNATTESTED"
+
+
+class CorroborationType(str, Enum):
+    NONE_OPERATOR_ONLY = "none_operator_only"
+    AUTOMATED_MIRROR_MATCH = "automated_mirror_match"
+    GOV_PDF_DIGITAL_SIGNATURE = "gov_pdf_digital_signature"
+    AUTOMATED_HTML_CROSS_CHECK = "automated_html_cross_check"
+
+
+class RedistributionClearance(str, Enum):
+    VERIFIED_PUBLIC_LAW = "verified_public_law"
+    RESTRICTED_DO_NOT_COMMIT = "restricted_do_not_commit"
+    PENDING_REVIEW = "pending_review"
+
+
+class DocumentCompleteness(str, Enum):
+    COMPLETE = "complete"
+    PARTIAL_VERIFIED = "partial_verified"
+    PARTIAL_MVP = "partial_mvp"
+    UNINGESTED = "uningested"
+
+
+class PublicationState(str, Enum):
+    VERIFIED_PUBLISHABLE = "VERIFIED_PUBLISHABLE"
+    PUBLISHED_WITH_CAVEAT = "PUBLISHED_WITH_CAVEAT"
+    LEGACY_UNVERIFIED = "LEGACY_UNVERIFIED"
+    UNRESOLVED_HISTORICAL = "UNRESOLVED_HISTORICAL"
+    BLOCKED_LEGAL_TOPIC = "BLOCKED_LEGAL_TOPIC"
+
+
+class LifecycleState(str, Enum):
+    IN_FORCE = "in_force"
+    SUPERSEDED = "superseded"
+    REPEALED = "repealed"
+    ENACTED_PENDING_COMMENCEMENT = "enacted_pending_commencement"
+    EFFECTIVE_DATE_UNRESOLVED = "effective_date_unresolved"
+    SUSPENDED_GAP = "suspended_gap"
+
+
+def _absolute_uri(value: str) -> str:
+    parsed = urlsplit(value)
+    if (
+        not parsed.scheme
+        or any(ord(char) <= 32 or ord(char) >= 127 or char == "\\" for char in value)
+        or (parsed.scheme in {"http", "https"} and not parsed.hostname)
+    ):
+        raise ValueError("Expected an absolute URI")
+    if parsed.netloc:
+        _ = parsed.port
+    return value
+
+
+def _date_time_input(value: Any) -> Any:
+    if value is None or isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}"
+        r"(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})",
+        value,
+    ):
+        raise ValueError("Expected an RFC 3339 date-time with seconds and a timezone")
+    return value
+
+
+class ManualAttestation(BaseModel):
+    """Operator attestation record required for manually acquired sources."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    attestation_id: str = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    document_id: str = Field(min_length=1)
+    captured_sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
+    operator_id: str = Field(min_length=1)
+    acquired_at_utc: AwareDatetime
+    claimed_source_url: str = Field(min_length=1)
+    portal_navigation_steps: str = Field(min_length=10)
+    capture_evidence_ref: str = Field(min_length=1)
+    independent_cross_check_ref: str = Field(min_length=1)
+    independent_cross_check_passed: StrictBool
+    corroboration_type: CorroborationType
+    notes: str | None = None
+
+    _validate_uri = field_validator("claimed_source_url")(_absolute_uri)
+    _validate_datetime = field_validator("acquired_at_utc", mode="before")(_date_time_input)
+
+    @model_validator(mode="after")
+    def validate_corroboration(self) -> "ManualAttestation":
+        if (
+            self.independent_cross_check_passed
+            and self.corroboration_type == CorroborationType.NONE_OPERATOR_ONLY
+        ):
+            raise ValueError(
+                "corroboration_type cannot be none_operator_only when independent_cross_check_passed is True"
+            )
+        return self
+
+
+class HttpAcquisitionEvidence(BaseModel):
+    """HTTP metadata captured with the transport evidence on a completed acquisition."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    final_url: str
+    redirect_history: tuple[str, ...] = Field(max_length=5)
+    status_code: Literal[200]
+    content_type: Literal["application/pdf", "text/html"]
+    response_headers: dict[str, str]
+
+    _validate_uri = field_validator("final_url")(_absolute_uri)
+
+    @field_validator("redirect_history")
+    @classmethod
+    def validate_redirect_uris(cls, urls: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_absolute_uri(url) for url in urls)
+
+
+class BoundaryRegistry(BaseModel):
+    """Certified topic coverage registry for closed-world retrieval gating."""
 
     model_config = ConfigDict(extra="forbid")
+
+    verified_topics: tuple[str, ...] = Field(default_factory=tuple)
+    post_cutoff_amendments: dict[str, str] = Field(default_factory=dict)
+    coverage_status: Literal["COMPLETE", "INCOMPLETE", "UNKNOWN"] = "UNKNOWN"
+
+
+class _ValidatedRecord(BaseModel):
+    """Preserve legacy assignment without leaving a record invalid after rejection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in type(self).model_fields:
+            fields = {field: getattr(self, field) for field in type(self).model_fields}
+            fields[name] = value
+            value = getattr(type(self).model_validate(fields), name)
+        super().__setattr__(name, value)
+
+
+class LegalSource(_ValidatedRecord):
+    """Manifest record tracking provenance and integrity of a raw official document."""
 
     source_id: str = Field(min_length=1)
     document_id: str = Field(min_length=1)
@@ -42,15 +195,24 @@ class LegalSource(BaseModel):
     publisher: str = Field(min_length=1)
     source_url: str = Field(min_length=1)
     local_path: str = Field(min_length=1)
-    retrieved_at: datetime
+    retrieved_at: AwareDatetime
     sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
     page_count: int | None = Field(default=None, ge=1)
-    is_authoritative: bool
-    artifact_type: Literal["raw_pdf", "derived_text"] = "raw_pdf"
+    is_authoritative: StrictBool
+    artifact_type: Literal["raw_html", "raw_pdf", "derived_text"] = "raw_pdf"
+    source_role: Literal["extraction_primary", "archival_reference"] = "extraction_primary"
     derived_from_source_id: str | None = None
     extraction_tool: str | None = None
     extraction_version: str | None = None
-    extraction_method: Literal["manual", "pdf_text", "ocr"]
+    extraction_method: Literal["manual", "html_dom", "pdf_text", "ocr"]
+    authenticity_tier: AuthenticityTier = AuthenticityTier.LEGACY_UNATTESTED
+    attestation_id: str | None = None
+    tls_cert_fingerprint: str | None = Field(default=None, pattern=r"^SHA256:[a-fA-F0-9]{64}$")
+    redistribution_clearance: RedistributionClearance = RedistributionClearance.PENDING_REVIEW
+    http_capture: HttpAcquisitionEvidence | None = None
+
+    _validate_uri = field_validator("source_url")(_absolute_uri)
+    _validate_datetime = field_validator("retrieved_at", mode="before")(_date_time_input)
 
     @model_validator(mode="after")
     def validate_artifact_lineage(self) -> "LegalSource":
@@ -59,8 +221,43 @@ class LegalSource(BaseModel):
                 raise ValueError("derived_text sources must specify derived_from_source_id")
             if not self.extraction_tool or not self.extraction_version:
                 raise ValueError("derived_text sources must specify extraction tool and version")
-        elif self.derived_from_source_id:
-            raise ValueError("raw_pdf sources cannot specify derived_from_source_id")
+        elif self.derived_from_source_id is not None:
+            raise ValueError(f"{self.artifact_type} sources cannot specify derived_from_source_id")
+        return self
+
+    @model_validator(mode="after")
+    def validate_authenticity_and_authority(self) -> "LegalSource":
+        if self.authenticity_tier in (
+            AuthenticityTier.OPERATOR_ATTESTED_ONLY,
+            AuthenticityTier.GOV_INDEPENDENTLY_CORROBORATED,
+        ):
+            if not self.attestation_id:
+                raise ValueError(f"{self.authenticity_tier.value} sources require attestation_id")
+        if (
+            self.authenticity_tier != AuthenticityTier.GOV_AUTOMATED_TLS_VERIFIED
+            and self.tls_cert_fingerprint is not None
+        ):
+            raise ValueError("Only automated TLS acquisition can record a TLS fingerprint")
+        if self.authenticity_tier == AuthenticityTier.GOV_AUTOMATED_TLS_VERIFIED:
+            if not self.tls_cert_fingerprint:
+                raise ValueError("GOV_AUTOMATED_TLS_VERIFIED sources require tls_cert_fingerprint")
+            if self.attestation_id is not None:
+                raise ValueError("Automated acquisition cannot claim operator attestation")
+        if self.http_capture is not None:
+            if self.authenticity_tier != AuthenticityTier.GOV_AUTOMATED_TLS_VERIFIED:
+                raise ValueError("HTTP capture requires automated TLS verification")
+            capture = self.http_capture
+            first_url = (
+                capture.redirect_history[0] if capture.redirect_history else capture.final_url
+            )
+            expected_type = {"raw_pdf": "application/pdf", "raw_html": "text/html"}
+            if (
+                first_url != self.source_url
+                or expected_type.get(self.artifact_type) != capture.content_type
+            ):
+                raise ValueError("HTTP evidence contradicts the source URL or artifact format")
+        if self.is_authoritative and self.language != "ar":
+            raise ValueError("Authoritative sources must be Arabic ('ar')")
         return self
 
 
@@ -90,6 +287,9 @@ class LegalDocument(BaseModel):
     supersedes: list[str] = Field(default_factory=list)
     superseded_by: list[str] = Field(default_factory=list)
     coverage_status: Literal["complete", "partial_mvp"] = "partial_mvp"
+    gazette_number: str | None = None
+    completeness: DocumentCompleteness = DocumentCompleteness.PARTIAL_MVP
+    missing_article_numbers: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def valid_effective_window(self) -> "LegalDocument":
@@ -102,12 +302,12 @@ class LegalDocument(BaseModel):
         return self
 
 
-class LegalProvision(BaseModel):
+class LegalProvision(_ValidatedRecord):
     """An article/clause-sized unit suitable for citation and retrieval."""
 
-    model_config = ConfigDict(extra="forbid")
-
     provision_id: str = Field(min_length=1)
+    logical_provision_id: str | None = None
+    version_id: str | None = None
     document_id: str = Field(min_length=1)
     source_id: str = Field(min_length=1)
     jurisdiction: Jurisdiction
@@ -116,15 +316,60 @@ class LegalProvision(BaseModel):
     clause: str | None = None
     subclause: str | None = None
     language: Literal["en", "ar"]
-    is_authoritative: bool
+    is_authoritative: StrictBool
     alignment_id: str | None = None
     translation_of: str | None = None
+    translation_provenance: (
+        Literal[
+            "authoritative_original",
+            "official_government_translation",
+            "unavailable_official",
+        ]
+        | None
+    ) = None
     text: str = Field(min_length=1)
+    normalized_text: str | None = None
     effective_from: date | None = None
     effective_until: date | None = None
+    uncertainty_window_start: date | None = None
+    uncertainty_window_end: date | None = None
+    lifecycle_state: LifecycleState = LifecycleState.IN_FORCE
+    gap_or_repeal_reason: str | None = None
+    publication_state: PublicationState = PublicationState.LEGACY_UNVERIFIED
+    caveat_codes: tuple[str, ...] = ()
     source_url: str = Field(min_length=1)
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
+    extraction_fidelity_score: float | None = Field(default=None, strict=True, ge=0.0, le=1.0)
+    cmap_corruption_detected: StrictBool = False
+    human_verification_status: Literal["unreviewed", "extraction_verified", "rejected"] = (
+        "unreviewed"
+    )
+    reviewer_id: str | None = None
+    reviewed_at_utc: AwareDatetime | None = None
+
+    _validate_uri = field_validator("source_url")(_absolute_uri)
+    _validate_datetime = field_validator("reviewed_at_utc", mode="before")(_date_time_input)
+
+    @model_validator(mode="after")
+    def default_ids_and_authoritative(self) -> "LegalProvision":
+        if self.logical_provision_id is None:
+            object.__setattr__(self, "logical_provision_id", self.alignment_id or self.provision_id)
+        if self.version_id is None:
+            object.__setattr__(
+                self, "version_id", f"{self.alignment_id or self.provision_id}@legacy"
+            )
+
+        if self.is_authoritative:
+            if self.language != "ar":
+                raise ValueError("Only Arabic provisions can be marked is_authoritative=True")
+            if self.translation_provenance is None:
+                object.__setattr__(self, "translation_provenance", "authoritative_original")
+            elif self.translation_provenance != "authoritative_original":
+                raise ValueError(
+                    "Authoritative Arabic provisions must have translation_provenance='authoritative_original'"
+                )
+        return self
 
     @model_validator(mode="after")
     def valid_authority_translation_and_pages(self) -> "LegalProvision":
@@ -148,6 +393,61 @@ class LegalProvision(BaseModel):
             and self.effective_until < self.effective_from
         ):
             raise ValueError("effective_until cannot be less than effective_from")
+        if (
+            self.uncertainty_window_start is not None
+            and self.uncertainty_window_end is not None
+            and self.uncertainty_window_end < self.uncertainty_window_start
+        ):
+            raise ValueError("uncertainty_window_end cannot be less than uncertainty_window_start")
+        return self
+
+    @model_validator(mode="after")
+    def validate_publication_and_lifecycle(self) -> "LegalProvision":
+        if self.publication_state == PublicationState.VERIFIED_PUBLISHABLE:
+            if self.human_verification_status != "extraction_verified":
+                raise ValueError(
+                    "VERIFIED_PUBLISHABLE provisions must have human_verification_status='extraction_verified'"
+                )
+            if not self.reviewer_id or not self.reviewed_at_utc:
+                raise ValueError(
+                    "VERIFIED_PUBLISHABLE provisions must specify reviewer_id and reviewed_at_utc"
+                )
+            if self.cmap_corruption_detected:
+                raise ValueError(
+                    "VERIFIED_PUBLISHABLE provisions cannot have cmap_corruption_detected=True"
+                )
+            if self.caveat_codes:
+                raise ValueError("VERIFIED_PUBLISHABLE provisions cannot carry active caveat_codes")
+
+        elif self.publication_state == PublicationState.PUBLISHED_WITH_CAVEAT:
+            if not self.caveat_codes:
+                raise ValueError(
+                    "PUBLISHED_WITH_CAVEAT provisions must carry at least one caveat code"
+                )
+
+        elif self.publication_state == PublicationState.UNRESOLVED_HISTORICAL:
+            if not self.uncertainty_window_start or not self.uncertainty_window_end:
+                raise ValueError(
+                    "UNRESOLVED_HISTORICAL provisions require explicit uncertainty_window_start and uncertainty_window_end"
+                )
+
+        if (
+            self.lifecycle_state == LifecycleState.IN_FORCE
+            and self.effective_from is None
+            and self.publication_state != PublicationState.LEGACY_UNVERIFIED
+        ):
+            raise ValueError("In-force, non-legacy provisions require effective_from")
+        if self.lifecycle_state == LifecycleState.SUPERSEDED:
+            if self.effective_from is None or self.effective_until is None:
+                raise ValueError(
+                    "SUPERSEDED provisions must have both effective_from and effective_until"
+                )
+        elif self.lifecycle_state in (LifecycleState.REPEALED, LifecycleState.SUSPENDED_GAP):
+            if not self.gap_or_repeal_reason:
+                raise ValueError(
+                    f"{self.lifecycle_state.value} provisions require gap_or_repeal_reason"
+                )
+
         return self
 
 

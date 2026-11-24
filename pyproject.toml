@@ -35,6 +35,13 @@ agent = [
     "langgraph>=1.0.0",
     "langchain-core>=1.0.0",
 ]
+corpus = [
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.2.0",
+    "pymupdf>=1.24.0",
+    "hypothesis>=6.100.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -75,6 +82,12 @@ module = [
     "langgraph.*",
     "langchain_core.*",
     "jsonschema.*",
+    "httpx.*",
+    "bs4.*",
+    "lxml.*",
+    "fitz.*",
+    "pymupdf.*",
+    "hypothesis.*",
 ]
 ignore_missing_imports = true
 

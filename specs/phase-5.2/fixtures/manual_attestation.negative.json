@@ -8,5 +8,7 @@
   "capture_evidence_ref": "evidence.png",
   "independent_cross_check_ref": "ref",
   "independent_cross_check_passed": true,
-  "corroboration_type": "invalid_corroboration_type"
+  "corroboration_type": "invalid_corroboration_type",
+  "document_id": "SYNTHETIC_TEST_ONLY_FDL_20_2023",
+  "captured_sha256": "9bf7190c7cd3e52731e7a911f301025292be35231d6cda4db4ec59e7f236e284"
 }
