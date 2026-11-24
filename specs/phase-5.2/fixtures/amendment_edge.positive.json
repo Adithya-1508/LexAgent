@@ -1,0 +1,11 @@
+{
+  "edge_id": "SYNTHETIC_TEST_ONLY_EDGE_FDL_14_2022_ART_01_TO_FDL_33_2021_ART_08_03",
+  "amending_document_id": "SYNTHETIC_TEST_ONLY_FDL_14_2022",
+  "amending_article_ref": "Article 1",
+  "target_logical_provision_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_08_03",
+  "action": "replaces",
+  "effective_date": "2022-09-29",
+  "prior_version_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_08_03@2022-02-02",
+  "new_version_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_08_03@2022-09-29",
+  "source_id": "SYNTHETIC_TEST_ONLY_GOV_UAE_FDL_14_2022_HTML"
+}

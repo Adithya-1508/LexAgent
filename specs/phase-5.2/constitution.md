@@ -1,0 +1,32 @@
+# LexAgent Project Constitution (Phase 5.2 Amendments)
+
+*Note: No `constitution.md` currently exists on `main`. This document codifies the existing Phase 5.1 safety guarantees verified in `src/uae_lexagent/models.py`, `src/uae_lexagent/ingestion.py`, `src/uae_lexagent/synthesis/verifier.py`, and `src/uae_lexagent/evaluation/validate.py`, and introduces Phase 5.2 constitutional principles.*
+
+## Article I — Legal Authority & Language Primacy
+
+1. **Arabic Legal Primacy (FDL 33/2021 Art. 66(2)):** Arabic is the sole legally authoritative language for UAE federal legislation. Every publishable provision MUST have an authoritative Arabic text (`is_authoritative=True`, `translation_provenance="authoritative_original"`). English text is never legally authoritative (`is_authoritative=False`).
+2. **No Silent Substitution of Unofficial Translations:** Missing official English translations MUST be explicitly marked `translation_provenance="unavailable_official"`. Machine-translated or LLM-generated translations are strictly prohibited inside the canonical statutory corpus.
+3. **Statutory Clause-Level Grounding Fidelity:** Legal provisions and citations must bind to the exact statutory clause governing the legal subject matter. For end-of-service gratuity calculations of foreign full-time employees, citations MUST bind to Federal Decree-Law No. 33 of 2021 Article 51(2) (`FDL_33_2021_ART_51_02`). Article 51(1) governs UAE National Worker pensions and social security (GPSSA) and must never be cited as the legal basis for foreign worker gratuity.
+
+## Article II — Fail-Closed Safety & Honest Epistemology
+
+4. **Fail-Closed Ordinary Retrieval:** Ordinary production retrieval MUST serve only `VERIFIED_PUBLISHABLE` provisions by default (`include_caveated=False`, `allow_legacy_unverified=False`). Caveated provisions require explicit caller opt-in and mandatory caveat disclosure enforcement.
+5. **Positive Topic Coverage Principle (Anti-Open-World):** The absence of an amending decree in the corpus cannot be treated as evidence that the law has not changed. A legal domain cannot be asserted as "current law" without positive confirmation that all amending instruments up to the system cutoff date (`system_cutoff = 2024-08-31`) are fully ingested and verified. If a topic's coverage is marked `unknown` or `incomplete` in the Boundary Registry, retrieval and synthesis MUST fail closed with explicit abstention (`stale_or_incomplete_amendment_coverage`).
+6. **No Automatic Promotion of Legacy Data:** Pre-Phase 5.2 provisions load as `LEGACY_UNVERIFIED` and MUST NEVER be silently promoted to `VERIFIED_PUBLISHABLE` without completing full snapshot acquisition, authenticity verification, and `RV-01`–`RV-11` validation.
+7. **No Automatic Claim Authorization:** Adding a provision to the corpus grants zero authorized legal claims by default. Every claim emitted by synthesis must match an explicitly reviewed, version-scoped entry in `claim_key_registry.json`.
+8. **Honest Provenance Separation:** Cryptographic hashing (SHA-256) proves byte-level integrity after capture only. Operator attestation proves documented custody only. Neither may be represented as equivalent to automated TLS-verified or cryptographically signed government-origin authenticity.
+9. **Honest Verification Boundaries:** Heuristic citation, numeric, and structural checks are technical safeguards and triage signals—never mathematical proofs of semantic entailment or bilingual legal equivalence.
+
+## Article III — Temporal, Jurisdictional & Procedural Integrity
+
+10. **Explicit Temporal Grounding & Cutoff Disclosure:** Every retrieval and citation check MUST bind to a resolved `as_of` date using closed inclusive intervals `[effective_from, effective_until]`. When `as_of` is omitted on user queries, the system MUST resolve it deterministically to `system_cutoff = 2024-08-31` and attach a mandatory, non-bypassable `TEMPORAL_CUTOFF_DISCLOSURE`. Historical cutoffs must never be silently presented as current law.
+11. **180-Day Freshness Horizon & Affirmative Coverage Rules (Current & Historical):**
+    - **Current-Law Guardrail:** If runtime execution clock exceeds `system_cutoff + 180 days`, any query requesting current law (undated queries or `as_of` resolving to `system_cutoff`) MUST FAIL CLOSED and ABSTAIN (`abstention_reason="corpus_verification_expired"`). A warning alone **MUST NEVER** authorize a current-law answer.
+    - **Historical Coverage Invariant:** Explicit historical queries (`as_of <= system_cutoff`) are exempt from the 180-day wall-clock execution limit, but strictly require **affirmative verified topic coverage** in `BoundaryRegistry.verified_topics` for that statutory topic at the requested date. Merely matching an existing provision in the corpus is **strictly insufficient**; if historical coverage is uncertified, missing, `UNKNOWN`, `INCOMPLETE`, or contradictory, the system **MUST FAIL CLOSED AND ABSTAIN** (`abstention_reason="unverified_historical_topic_coverage"`).
+12. **Procedural Transition Fidelity & Fact Sufficiency (FDL 9/2024 Art. 2):** Historical evaluations MUST use the verified statutory version governing the requested date. Evaluate transfer only for Article 54(3) challenges with an established commencement date and the required Court of Appeal posture, including decided and reserved-for-judgment exceptions. Filing date alone never selects a court. If the governing text or commencement needed for a venue answer is unresolved, abstain with `temporal_uncertainty`. If required procedural facts are missing or ambiguous, abstain with `missing_procedural_facts` or request clarification.
+13. **Strict Jurisdiction Hygiene:** The canonical Phase 5.2 corpus is strictly limited to `uae_onshore` mainland private-sector employment law. DIFC, ADGM, domestic workers (FDL 9/2022), and public-sector HR rules are explicitly out of scope and must trigger deterministic abstention or scope disclosure.
+
+## Article IV — Operational & Solo-Developer Sustainability
+
+14. **Zero Paid Infrastructure:** All ingestion, validation, storage, indexing, evaluation, and CI workflows MUST run locally on commodity hardware and free GitHub Actions tiers without paid cloud services, managed vector databases, or paid LLM APIs.
+15. **Core-Minimal Dependency Discipline:** Core runtime dependencies in `pyproject.toml` remain strictly minimal (`pydantic>=2.7,<3`). Corpus acquisition and parsing libraries belong exclusively in an optional `[corpus]` extra so the `core-minimal` CI job stays green.

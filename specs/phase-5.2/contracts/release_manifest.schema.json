@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lexagent.local/schemas/phase-5.2/release_manifest.schema.json",
+  "title": "CorpusReleaseManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "release_version",
+    "schema_version",
+    "built_at_utc",
+    "effective_as_of_max",
+    "corpus_fingerprint",
+    "claim_key_registry_sha256",
+    "documents",
+    "artifact_checksums",
+    "publication_summary",
+    "quarantine_ledger"
+  ],
+  "properties": {
+    "release_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "built_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "git_commit_sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "effective_as_of_max": {
+      "type": "string",
+      "format": "date"
+    },
+    "corpus_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "claim_key_registry_sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "document_id",
+          "document_path",
+          "provisions_path",
+          "completeness"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "document_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provisions_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "completeness": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL_VERIFIED",
+              "PARTIAL_MVP",
+              "UNINGESTED"
+            ]
+          },
+          "missing_article_numbers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        }
+      }
+    },
+    "artifact_checksums": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-fA-F0-9]{64}$"
+      }
+    },
+    "publication_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_publishable",
+        "published_with_caveat",
+        "legacy_unverified",
+        "unresolved_historical",
+        "blocked_legal_topic"
+      ],
+      "properties": {
+        "verified_publishable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "published_with_caveat": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "legacy_unverified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_historical": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked_legal_topic": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "quarantine_ledger": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version_id",
+          "publication_state",
+          "reason"
+        ],
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "publication_state": {
+            "type": "string",
+            "enum": [
+              "LEGACY_UNVERIFIED",
+              "UNRESOLVED_HISTORICAL",
+              "BLOCKED_LEGAL_TOPIC"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

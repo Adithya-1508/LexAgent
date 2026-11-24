@@ -1,0 +1,13 @@
+{
+  "attestation_id": "SYNTHETIC_TEST_ONLY_ATTEST_FDL_20_2023_AR_001",
+  "source_id": "SYNTHETIC_TEST_ONLY_GOV_UAE_FDL_20_2023_AR_PDF",
+  "operator_id": "ENG_OPERATOR_01",
+  "acquired_at_utc": "2026-11-20T10:00:00Z",
+  "claimed_source_url": "https://uaelegislation.gov.ae/ar/constitution/modifications/1297/download",
+  "portal_navigation_steps": "Navigated to UAE Legislation Portal, located modification 1297, clicked download PDF link directly.",
+  "capture_evidence_ref": "data/official_sources/snapshots/attestations/evidence_1297.png",
+  "independent_cross_check_ref": "SHA256 match against secondary government archive mirror",
+  "independent_cross_check_passed": true,
+  "corroboration_type": "automated_html_cross_check",
+  "notes": "Verified that Article 54 replacement text matches HTML text."
+}

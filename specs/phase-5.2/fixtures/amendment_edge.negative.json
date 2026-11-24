@@ -1,0 +1,10 @@
+{
+  "edge_id": "SYNTHETIC_TEST_ONLY_EDGE_INVALID_ACTION",
+  "amending_document_id": "SYNTHETIC_TEST_ONLY_FDL_14_2022",
+  "amending_article_ref": "Article 1",
+  "target_logical_provision_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_08_03",
+  "action": "invalid_action_verb",
+  "effective_date": "2022-09-29",
+  "new_version_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_08_03@2022-09-29",
+  "source_id": "SYNTHETIC_TEST_ONLY_GOV_UAE_FDL_14_2022_HTML"
+}

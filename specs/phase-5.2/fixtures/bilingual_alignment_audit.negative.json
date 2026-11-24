@@ -1,0 +1,8 @@
+{
+  "audit_id": "SYNTHETIC_TEST_ONLY_AUDIT_INVALID_STATUS",
+  "version_id": "SYNTHETIC_TEST_ONLY_FDL_33_2021_ART_51_02@2022-02-02",
+  "ar_provision_id": "SYNTHETIC_TEST_ONLY_PROV_FDL_33_2021_ART_51_02_AR",
+  "structural_alignment_status": "exact_match",
+  "numeric_consistency_status": "invalid_numeric_status",
+  "semantic_equivalence_status": "unverified_semantically"
+}
