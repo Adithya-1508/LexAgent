@@ -30,7 +30,7 @@ This document records all structured self-review passes, Review Round 1 findings
 
 ## 4. PR #2 Remediation Pass (M5.2.0 Hardening)
 1. **Corrected Missing-`as_of` Contract:** Defined strict temporal cutoff governance. A historical cutoff (`effective_as_of_max = 2024-08-31`) must never be silently served as current law. Mandated `TEMPORAL_CUTOFF_DISCLOSURE` on all undated queries and fail-closed abstention (`stale_or_incomplete_amendment_coverage`) for provisions with post-cutoff amendments.
-2. **Exact Test-Level Baseline Compatibility:** Eliminated all approximate counts and double-counting in `M5.2.0_Compatibility_Matrix.md`. Reconciled all 145 baseline tests individually into 118 Tier 1 (Unchanged), 22 Tier 2 (Opt-In), 5 Tier 3 (Upgraded), and 0 Tier 4 (Failures).
+2. **Exact Test-Level Baseline Compatibility:** Eliminated all approximate counts and double-counting in `M5.2.0_Compatibility_Matrix.md`. Reconciled all 145 baseline tests individually into 117 Tier 1 (Unchanged), 23 Tier 2 (Opt-In), 5 Tier 3 (Upgraded), and 0 Tier 4 (Failures).
 3. **Claim-Level Legal Evidence Table:** Added comprehensive evidence matrix in `M5.2.0_Legal_Source_Verification.md` with explicit URLs, verbatim captured facts, verification dates, and access limitations. Gated upstream PDFs explicitly marked `UNRETRIEVED_UPSTREAM_PDF_GATE` rather than falsely claiming independent verification.
 4. **Document Harmonization:** Reconciled coverage dates (2024-08-31 cutoff, 74 and 39 articles), publication defaults, and quarantine rules across all 17 planning package files and 5 baseline validation reports.
 5. **CodeRabbit Status Separation:** Recorded external third-party CodeRabbit app status (`Review rate limited`) separately from the 11 passing internal GitHub Actions CI workflow jobs.
@@ -62,7 +62,7 @@ In response to independent Codex review findings on PR #2 at `56c2b21`, the plan
    - Removed silent `pytest.importorskip("jsonschema")` in favor of direct import, eliminating risk of false green CI builds.
    - Pinned `jsonschema[format-nongpl]>=4.23.0` in dev dependencies, providing `rfc3339-validator` and `rfc3986-validator`.
    - Attached `format_checker=Draft202012Validator.FORMAT_CHECKER` to schema tests.
-   - Expanded `tests/test_phase_5_2_schemas.py` to 57 independent unit tests covering missing required fields, invalid enums, extra properties rejection, malformed URIs, malformed datetimes, and conditional logic.
+   - Expanded `tests/test_phase_5_2_schemas.py` to 61 independent unit tests covering missing required fields, invalid enums, extra properties rejection, malformed URIs, malformed datetimes, and conditional logic.
 
 5. **Synthetic Fixtures & Provenance (HIGH):**
    - Marked all 14 schema fixtures as `SYNTHETIC_TEST_ONLY_...` to avoid confusing test payloads with real statutory records.
@@ -85,12 +85,12 @@ In response to independent Codex review findings on PR #2 at `56c2b21`, the plan
    - Supported `SOURCE_DATE_EPOCH` for reproducible build timestamps.
 
 8. **Compatibility Matrix Exact Test Inventory (MEDIUM):**
-   - Regenerated exact test inventory from actual pytest collection across 9 files (145 baseline tests: 118 Tier 1 Unchanged, 22 Tier 2 Opt-In, 5 Tier 3 Upgraded, 0 Failures).
+   - Regenerated exact test inventory from actual pytest collection across 9 files (145 baseline tests: 117 Tier 1 Unchanged, 23 Tier 2 Opt-In, 5 Tier 3 Upgraded, 0 Failures).
    - Reconciled exact test node IDs in `tests/test_models.py` (replacing placeholder names with actual names) and `tests/test_agent.py` (restoring omitted `test_unverified_answer_never_leaks_unsupported_text`).
    - Corrected fingerprint definition to canonical JSON serialization of sorted provisions hashed with SHA-256.
 
 9. **Implementation Readiness & Full Output Disclosure (MEDIUM):**
-   - Updated readiness and validation reports to 57 schema tests and 202 total tests.
+   - Updated readiness and validation reports to 61 schema tests and 206 total tests.
    - Inserted full, unclipped output of `validate.py`, explicitly disclosing the 4 unretrieved upstream raw PDF snapshots and 61 uningested articles of FDL 33/2021.
    - Documented Cabinet Resolution 1/2022's full 39-article scope (1 ingested, 38 uningested).
 
@@ -125,8 +125,8 @@ In response to the independent Codex re-review of PR #2 at `31b2deee7ed21805b4b4
 
 4. **Enforcement Coverage Across Actual Repository Modules (HIGH):**
    - Updated `retrieval_and_verifier_contracts.md`, `plan.md`, and `tasks.md` to reference the real repository layout:
-     - Standalone retrieval: `src/uae_lexagent/retrieval/hybrid.py`, `baseline.py`, `sparse.py`, `dense.py`, `fusion.py`, `indexing.py`, `contracts.py`.
-     - Synthesis engine & verifier: `src/uae_lexagent/synthesis/engine.py`, `synthesis/verifier.py`, `synthesis/contracts.py`.
+     - Standalone retrieval: `src/uae_lexagent/retrieval/hybrid.py`, `baseline.py`, `sparse.py`, `vector_store.py` (`InMemoryVectorStore`, `QdrantVectorStore`), `fusion.py`, `indexing.py`, `contracts.py`.
+     - Synthesis engine & verifier: `src/uae_lexagent/synthesis/engine.py` (`LegalSynthesisEngine`), `synthesis/verifier.py`, `synthesis/contracts.py`.
      - Agent orchestration: `src/uae_lexagent/agent/nodes.py`, `agent/graph.py`, `agent/orchestrator.py`.
    - Mandated universal evidence provenance gate (`RV-01`–`RV-03`) for caller-supplied synthesis evidence.
 

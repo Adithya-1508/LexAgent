@@ -21,12 +21,12 @@ This archive is structured to drop directly into `specs/phase-5.2/` on `main` up
 | `review-findings.md` | Traceable log of self-review passes, Round 1 (#1–#10), Contract Review (#1–#7), and Codex BLOCK Remediation |
 | `M5.2.0_Legal_Source_Verification.md` | Exhaustive primary-source evidence matrix for FDL 33/2021, 14/2022, 20/2023, 9/2024, CR 1/2022, and Art 51(2) |
 | `M5.2.0_Compatibility_Matrix.md` | Exact test-level inventory reconciling all 145 baseline tests across 4 tiers with zero double-counting |
-| `M5.2.0_Implementation_Readiness.md` | Implementation readiness review, 5 quality gates (202 passed tests), and PR-2 scope authorization gate |
+| `M5.2.0_Implementation_Readiness.md` | Implementation readiness review, 5 quality gates (206 passed tests), and PR-2 scope authorization gate |
 | `M5.2.0_Validation_Report.md` | Independent architectural audit, requirements traceability, and Draft 2020-12 schema validation evidence |
 | `M5.2.0_Open_Issues.md` | Canonical issue register classifying findings into `VERIFIED`, `PROPOSED`, and `BLOCKED` |
 | `contracts/*.schema.json` | Strict Draft 2020-12 JSON Schemas for all Phase 5.2 canonical artifacts with conditional checks |
 | `contracts/retrieval_and_verifier_contracts.md` | Exact multi-version indexing, `as_of` selection, fail-closed disclosure, and claim-key registry contracts |
-| `fixtures/*.json` | Positive and negative test fixtures marked `SYNTHETIC_TEST_ONLY` with verified SHA-256 digests |
+| `fixtures/*.json` | Positive and negative test fixtures marked `SYNTHETIC_TEST_ONLY` for contract and schema validation |
 
 ## Owner Decisions Incorporated
 
