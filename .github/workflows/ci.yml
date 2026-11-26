@@ -139,7 +139,7 @@ jobs:
             test_target: "tests/test_models.py tests/test_ingestion.py tests/test_tools.py tests/test_routing.py"
           - name: "corpus-acquisition"
             install: ".[dev,corpus]"
-            test_target: "tests/test_acquisition.py tests/test_legacy_defaults.py tests/test_phase_5_2_schemas.py"
+            test_target: "tests/test_acquisition.py tests/test_legacy_defaults.py tests/test_phase_5_2_schemas.py tests/test_extractor_determinism.py tests/test_arabic_normalizer_hypothesis.py tests/test_cmap_gate.py"
           - name: "retrieval-qdrant"
             install: ".[dev,retrieval,qdrant]"
             test_target: "tests/test_retrieval.py"
